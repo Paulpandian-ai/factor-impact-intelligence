@@ -2,5 +2,6 @@ yfinance
 fredapi
 pandas
 numpy
-plotly
-streamlit
+plotly>=5.0.0
+streamlit>=1.30.0
+altair<5
