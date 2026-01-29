@@ -1,9 +1,6 @@
 """
-Factor Impact Intelligence - Streamlit Web App
-For deployment on Streamlit Cloud
-
-Author: Paul Balasubramanian
-Project: Technology Strategy Final Project
+Factor Impact Intelligence - Multi-Module Analysis Platform
+Modules: Monetary + Company Performance
 """
 
 import streamlit as st
@@ -16,388 +13,241 @@ import plotly.graph_objects as go
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import company analyzer
+from company_analyzer import CompanyPerformanceAnalyzer
 
-# Page configuration
-st.set_page_config(
-    page_title="Factor Impact Intelligence",
-    page_icon="💰",
-    layout="wide"
-)
+st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        padding: 1rem 0;
-    }
-    .buy-signal {
-        color: #00cc00;
-        font-weight: bold;
-        font-size: 1.8rem;
-    }
-    .sell-signal {
-        color: #ff0000;
-        font-weight: bold;
-        font-size: 1.8rem;
-    }
-    .hold-signal {
-        color: #ff9900;
-        font-weight: bold;
-        font-size: 1.8rem;
-    }
-    .disclaimer {
-        background-color: #fff3cd;
-        border: 1px solid #ffc107;
-        border-radius: 0.5rem;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Header
+st.markdown("# 💰 Factor Impact Intelligence")
+st.markdown("### Multi-Factor Stock Analysis Platform")
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    if 'fred_api_key' in st.secrets:
+        fred_api_key = st.secrets['fred_api_key']
+        st.success("✅ API key loaded")
+    else:
+        fred_api_key = st.text_input("FRED API Key", type="password", 
+                                     help="Get free key at fred.stlouisfed.org")
+    
+    st.markdown("---")
+    st.markdown("""
+    ### Modules Active
+    - ✅ Module 0: Monetary Factors
+    - ✅ Module 1: Company Performance
+    - 🔲 Module 2: Supplier Analysis
+    - 🔲 Module 3: Customer Analysis
+    - 🔲 Module 4: Competitor Analysis
+    - 🔲 Module 5: Macro Factors
+    - 🔲 Module 6: Correlation Analysis
+    - 🔲 Module 7: Master Agent
+    """)
 
 
 class MonetaryFactorAnalyzer:
-    """Analyzes monetary factors and provides stock recommendations"""
+    """Analyzes monetary factors"""
     
-    def __init__(self, fred_api_key: str):
+    def __init__(self, fred_api_key):
         self.fred = Fred(api_key=fred_api_key)
-        self.weights = {
-            'fed_rate': 0.35,
-            'inflation': 0.35,
-            'treasury_yield': 0.30
-        }
     
-    def get_stock_data(self, ticker: str):
+    def get_stock_data(self, ticker):
         try:
             stock = yf.Ticker(ticker)
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=365)
-            hist = stock.history(start=start_date, end=end_date)
+            end = datetime.now()
+            start = end - timedelta(days=365)
+            hist = stock.history(start=start, end=end)
             if hist.empty:
                 return None, None
             return hist, stock.info
         except:
             return None, None
     
-    def calculate_stock_beta(self, stock_data, info):
+    def calculate_beta(self, stock_data, info):
         try:
             if 'beta' in info and info['beta']:
                 return float(info['beta'])
-            stock_returns = stock_data['Close'].pct_change().dropna()
+            returns = stock_data['Close'].pct_change().dropna()
             spy = yf.Ticker('SPY')
             spy_hist = spy.history(start=stock_data.index[0], end=stock_data.index[-1])
             spy_returns = spy_hist['Close'].pct_change().dropna()
-            aligned_data = pd.DataFrame({'stock': stock_returns, 'market': spy_returns}).dropna()
-            if len(aligned_data) < 30:
+            aligned = pd.DataFrame({'stock': returns, 'market': spy_returns}).dropna()
+            if len(aligned) < 30:
                 return 1.0
-            cov = aligned_data.cov().loc['stock', 'market']
-            var = aligned_data['market'].var()
-            return cov / var
+            return aligned.cov().loc['stock', 'market'] / aligned['market'].var()
         except:
             return 1.0
     
-    def get_fed_funds_rate(self):
+    def get_fed_rate(self):
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=365)
-            fed_rate = self.fred.get_series('FEDFUNDS', observation_start=start_date, observation_end=end_date)
-            if fed_rate.empty:
+            end = datetime.now()
+            start = end - timedelta(days=365)
+            data = self.fred.get_series('FEDFUNDS', observation_start=start, observation_end=end)
+            if data.empty:
                 return None
-            current_rate = fed_rate.iloc[-1]
-            three_months_ago = fed_rate.iloc[-4] if len(fed_rate) >= 4 else fed_rate.iloc[0]
-            change_3m = current_rate - three_months_ago
-            
-            if change_3m > 0.25:
+            current = data.iloc[-1]
+            prev = data.iloc[-4] if len(data) >= 4 else data.iloc[0]
+            change = current - prev
+            if change > 0.25:
                 trend = "aggressive_tightening"
-            elif change_3m > 0:
+            elif change > 0:
                 trend = "tightening"
-            elif change_3m < -0.25:
+            elif change < -0.25:
                 trend = "aggressive_easing"
-            elif change_3m < 0:
+            elif change < 0:
                 trend = "easing"
             else:
                 trend = "stable"
-            
-            return {'current_rate': current_rate, 'change_3m': change_3m, 'trend': trend, 'data': fed_rate}
+            return {'current': current, 'change': change, 'trend': trend}
         except:
             return None
     
-    def get_inflation_data(self):
+    def get_inflation(self):
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=365)
-            cpi = self.fred.get_series('CPIAUCSL', observation_start=start_date, observation_end=end_date)
+            end = datetime.now()
+            start = end - timedelta(days=365)
+            cpi = self.fred.get_series('CPIAUCSL', observation_start=start, observation_end=end)
             if cpi.empty or len(cpi) < 12:
                 return None
-            current_cpi = cpi.iloc[-1]
-            year_ago_cpi = cpi.iloc[-13] if len(cpi) >= 13 else cpi.iloc[0]
-            yoy_inflation = ((current_cpi - year_ago_cpi) / year_ago_cpi) * 100
-            
-            if yoy_inflation > 4.0:
-                trend = "high_inflation"
-            elif yoy_inflation > 2.5:
-                trend = "elevated_inflation"
-            elif yoy_inflation >= 1.5:
-                trend = "target_range"
+            current = cpi.iloc[-1]
+            prev = cpi.iloc[-13] if len(cpi) >= 13 else cpi.iloc[0]
+            yoy = ((current - prev) / prev) * 100
+            if yoy > 4.0:
+                trend = "high"
+            elif yoy > 2.5:
+                trend = "elevated"
+            elif yoy >= 1.5:
+                trend = "target"
             else:
-                trend = "low_inflation"
-            
-            return {'yoy_inflation': yoy_inflation, 'trend': trend, 'data': cpi}
+                trend = "low"
+            return {'yoy': yoy, 'trend': trend}
         except:
             return None
     
-    def get_treasury_yield(self):
+    def get_yield(self):
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=365)
-            treasury_yield = self.fred.get_series('DGS10', observation_start=start_date, observation_end=end_date)
-            treasury_yield = treasury_yield.dropna()
-            if treasury_yield.empty:
+            end = datetime.now()
+            start = end - timedelta(days=365)
+            data = self.fred.get_series('DGS10', observation_start=start, observation_end=end).dropna()
+            if data.empty:
                 return None
-            current_yield = treasury_yield.iloc[-1]
-            month_ago = treasury_yield.iloc[-22] if len(treasury_yield) >= 22 else treasury_yield.iloc[0]
-            change_1m = current_yield - month_ago
-            
-            if change_1m > 0.5:
+            current = data.iloc[-1]
+            prev = data.iloc[-22] if len(data) >= 22 else data.iloc[0]
+            change = current - prev
+            if change > 0.5:
                 trend = "rapid_rise"
-            elif change_1m > 0.1:
+            elif change > 0.1:
                 trend = "rising"
-            elif change_1m < -0.5:
+            elif change < -0.5:
                 trend = "rapid_fall"
-            elif change_1m < -0.1:
+            elif change < -0.1:
                 trend = "falling"
             else:
                 trend = "stable"
-            
-            return {'current_yield': current_yield, 'change_1m': change_1m, 'trend': trend, 'data': treasury_yield}
+            return {'current': current, 'change': change, 'trend': trend}
         except:
             return None
     
-    def score_fed_rate_impact(self, fed_data, stock_beta):
-        if not fed_data:
-            return 0, "Unable to assess Fed rate impact"
-        
-        trend_scores = {
-            "aggressive_tightening": -2.0, "tightening": -1.0,
-            "aggressive_easing": 2.0, "easing": 1.0, "stable": 0.0
-        }
-        base_score = trend_scores[fed_data['trend']]
-        
-        if stock_beta > 1.5:
-            multiplier = 1.3
-        elif stock_beta > 1.2:
-            multiplier = 1.15
-        elif stock_beta < 0.8:
-            multiplier = 0.7
-        else:
-            multiplier = 1.0
-        
-        final_score = max(-2.0, min(2.0, base_score * multiplier))
-        reasoning = f"Fed Funds Rate: {fed_data['current_rate']:.2f}% ({fed_data['change_3m']:+.2f}% 3M change). "
-        
-        if final_score < -1:
-            reasoning += "VERY NEGATIVE - Rate hikes compress valuations"
-        elif final_score > 1:
-            reasoning += "VERY POSITIVE - Rate cuts boost growth"
-        else:
-            reasoning += "Neutral impact"
-        
-        return final_score, reasoning
-    
-    def score_inflation_impact(self, inflation_data, stock_beta):
-        if not inflation_data:
-            return 0, "Unable to assess inflation impact"
-        
-        trend_scores = {
-            "high_inflation": -1.5, "elevated_inflation": -0.5,
-            "target_range": 1.0, "low_inflation": 0.0
-        }
-        base_score = trend_scores[inflation_data['trend']]
-        multiplier = 1.2 if stock_beta > 1.5 else 1.0
-        final_score = max(-2.0, min(2.0, base_score * multiplier))
-        
-        reasoning = f"CPI: {inflation_data['yoy_inflation']:.2f}% YoY. "
-        if final_score < -1:
-            reasoning += "VERY NEGATIVE - High inflation forces tightening"
-        elif final_score > 1:
-            reasoning += "VERY POSITIVE - Cooling inflation"
-        else:
-            reasoning += "Moderate impact"
-        
-        return final_score, reasoning
-    
-    def score_treasury_yield_impact(self, yield_data, stock_beta):
-        if not yield_data:
-            return 0, "Unable to assess yield impact"
-        
-        trend_scores = {
-            "rapid_rise": -2.0, "rising": -1.0,
-            "rapid_fall": 2.0, "falling": 1.0, "stable": 0.0
-        }
-        base_score = trend_scores[yield_data['trend']]
-        multiplier = 1.3 if stock_beta > 1.5 else 1.0
-        final_score = max(-2.0, min(2.0, base_score * multiplier))
-        
-        reasoning = f"10Y Yield: {yield_data['current_yield']:.2f}%. "
-        if final_score < -1:
-            reasoning += "VERY NEGATIVE - Rising yields compress valuations"
-        elif final_score > 1:
-            reasoning += "VERY POSITIVE - Falling yields support growth"
-        else:
-            reasoning += "Moderate impact"
-        
-        return final_score, reasoning
-    
-    def calculate_composite_score(self, fed_score, inflation_score, yield_score):
-        weighted = (fed_score * 0.35 + inflation_score * 0.35 + yield_score * 0.30)
-        return round(5.5 + (weighted * 2.25), 1)
-    
-    def get_recommendation_signal(self, score):
-        if score >= 7.5:
-            return "STRONG BUY", "High"
-        elif score >= 6.5:
-            return "BUY", "Medium-High"
-        elif score >= 5.5:
-            return "HOLD (Lean Buy)", "Medium"
-        elif score >= 4.5:
-            return "HOLD", "Medium"
-        elif score >= 3.5:
-            return "HOLD (Lean Sell)", "Medium"
-        elif score >= 2.5:
-            return "SELL", "Medium-High"
-        else:
-            return "STRONG SELL", "High"
-    
-    def analyze_ticker(self, ticker):
-        stock_data, stock_info = self.get_stock_data(ticker)
+    def analyze(self, ticker):
+        stock_data, info = self.get_stock_data(ticker)
         if stock_data is None:
-            return {'error': f"Unable to fetch data for {ticker}", 'success': False}
+            return {'success': False, 'error': 'No data'}
         
-        stock_beta = self.calculate_stock_beta(stock_data, stock_info)
-        fed_data = self.get_fed_funds_rate()
-        inflation_data = self.get_inflation_data()
-        yield_data = self.get_treasury_yield()
+        beta = self.calculate_beta(stock_data, info)
+        fed_data = self.get_fed_rate()
+        inf_data = self.get_inflation()
+        yld_data = self.get_yield()
         
-        fed_score, fed_reasoning = self.score_fed_rate_impact(fed_data, stock_beta)
-        inflation_score, inflation_reasoning = self.score_inflation_impact(inflation_data, stock_beta)
-        yield_score, yield_reasoning = self.score_treasury_yield_impact(yield_data, stock_beta)
+        fed_scores = {"aggressive_tightening": -2.0, "tightening": -1.0, "aggressive_easing": 2.0, "easing": 1.0, "stable": 0.0}
+        fed_score = fed_scores.get(fed_data['trend'], 0) if fed_data else 0
         
-        composite_score = self.calculate_composite_score(fed_score, inflation_score, yield_score)
-        signal, confidence = self.get_recommendation_signal(composite_score)
+        inf_scores = {"high": -1.5, "elevated": -0.5, "target": 1.0, "low": 0.0}
+        inf_score = inf_scores.get(inf_data['trend'], 0) if inf_data else 0
+        
+        yld_scores = {"rapid_rise": -2.0, "rising": -1.0, "rapid_fall": 2.0, "falling": 1.0, "stable": 0.0}
+        yld_score = yld_scores.get(yld_data['trend'], 0) if yld_data else 0
+        
+        if beta > 1.5:
+            fed_score = max(-2.0, min(2.0, fed_score * 1.3))
+            inf_score = max(-2.0, min(2.0, inf_score * 1.2))
+            yld_score = max(-2.0, min(2.0, yld_score * 1.3))
+        
+        weighted = (fed_score * 0.35) + (inf_score * 0.35) + (yld_score * 0.30)
+        composite = round(5.5 + (weighted * 2.25), 1)
+        
+        if composite >= 7.5:
+            signal = "STRONG BUY"
+        elif composite >= 6.5:
+            signal = "BUY"
+        elif composite >= 5.5:
+            signal = "HOLD (Lean Buy)"
+        elif composite >= 4.5:
+            signal = "HOLD"
+        elif composite >= 3.5:
+            signal = "HOLD (Lean Sell)"
+        elif composite >= 2.5:
+            signal = "SELL"
+        else:
+            signal = "STRONG SELL"
         
         return {
-            'success': True,
-            'ticker': ticker.upper(),
-            'stock_beta': stock_beta,
-            'composite_score': composite_score,
-            'recommendation': signal,
-            'confidence': confidence,
-            'factors': {
-                'fed_rate': {'score': fed_score, 'reasoning': fed_reasoning, 'data': fed_data},
-                'inflation': {'score': inflation_score, 'reasoning': inflation_reasoning, 'data': inflation_data},
-                'treasury_yield': {'score': yield_score, 'reasoning': yield_reasoning, 'data': yield_data}
-            }
+            'success': True, 'ticker': ticker.upper(), 'score': composite,
+            'signal': signal, 'beta': beta, 'fed': fed_data, 'inf': inf_data,
+            'yld': yld_data, 'fed_score': fed_score, 'inf_score': inf_score, 'yld_score': yld_score
         }
 
 
-# Main App
-st.markdown('<div class="main-header">💰 Factor Impact Intelligence</div>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center; color: #666;">Monetary Factor Analysis Platform</p>', unsafe_allow_html=True)
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    
-    # Get API key from Streamlit secrets or user input
-    if 'fred_api_key' in st.secrets:
-        fred_api_key = st.secrets['fred_api_key']
-        st.success("✅ API key loaded from secrets")
-    else:
-        st.warning("⚠️ Add API key to Streamlit secrets")
-        fred_api_key = st.text_input("FRED API Key", type="password", 
-                                     help="Get free key at fred.stlouisfed.org")
-    
-    st.markdown("---")
-    st.markdown("""
-    ### About
-    This tool analyzes:
-    - 🏦 Fed Policy (Interest Rates)
-    - 📊 Inflation Trends (CPI)
-    - 📈 Treasury Yields (10-Year)
-    
-    Generates Buy/Hold/Sell signals based on monetary conditions.
-    """)
-    
-    st.markdown("---")
-    st.caption("CBS Technology Strategy | Final Project")
-
-# Main content
+# Main app
 if not fred_api_key:
-    st.info("👈 Please enter your FRED API key in the sidebar to begin")
-    st.markdown("""
-    ### Get Started
-    1. Visit [fred.stlouisfed.org](https://fred.stlouisfed.org/docs/api/api_key.html)
-    2. Create free account
-    3. Request API key (instant)
-    4. Enter in sidebar
-    """)
-else:
-    analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
+    st.info("👈 Enter your FRED API key in the sidebar")
+    st.stop()
+
+# Stock input
+col1, col2 = st.columns([3, 1])
+with col1:
+    ticker = st.text_input("Stock Ticker", value="NVDA", help="Enter stock symbol (e.g., NVDA, AAPL, MSFT)").upper()
+with col2:
+    st.write("")
+    st.write("")
+    analyze_btn = st.button("📊 Analyze All Modules", type="primary")
+
+if analyze_btn and ticker:
+    # Create tabs for different modules
+    tab1, tab2, tab3 = st.tabs(["📊 Summary", "💰 Monetary Analysis", "📄 Company Analysis"])
     
-    # Stock input
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        ticker = st.text_input("Enter Stock Ticker", value="NVDA", 
-                              help="E.g., NVDA, AAPL, MSFT").upper()
-    with col2:
-        st.write("")
-        st.write("")
-        analyze_button = st.button("📊 Analyze", type="primary", use_container_width=True)
-    
-    # Analyze
-    if analyze_button and ticker:
-        with st.spinner(f"Analyzing {ticker}..."):
-            result = analyzer.analyze_ticker(ticker)
+    with st.spinner(f"Analyzing {ticker} across all modules..."):
+        # Run both analyses
+        monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
+        company_analyzer = CompanyPerformanceAnalyzer()
         
-        if not result['success']:
-            st.error(f"❌ {result.get('error', 'Unknown error')}")
-        else:
-            # Metrics
-            st.markdown("---")
+        monetary_result = monetary_analyzer.analyze(ticker)
+        company_result = company_analyzer.analyze(ticker, verbose=False)
+    
+    # TAB 1: Summary
+    with tab1:
+        st.markdown(f"## {ticker} - Multi-Module Analysis")
+        
+        if monetary_result['success'] and company_result['success']:
+            # Combined score (simple average for now)
+            combined_score = round((monetary_result['score'] * 0.5 + company_result['score'] * 0.5), 1)
+            
             col1, col2, col3, col4 = st.columns(4)
-            
             with col1:
-                st.metric("Composite Score", f"{result['composite_score']}/10")
-            
+                st.metric("Combined Score", f"{combined_score}/10")
             with col2:
-                signal = result['recommendation']
-                if 'BUY' in signal:
-                    st.markdown(f'<div class="buy-signal">{signal}</div>', unsafe_allow_html=True)
-                elif 'SELL' in signal:
-                    st.markdown(f'<div class="sell-signal">{signal}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="hold-signal">{signal}</div>', unsafe_allow_html=True)
-                st.caption("Recommendation")
-            
+                st.metric("Monetary Score", f"{monetary_result['score']}/10")
             with col3:
-                st.metric("Confidence", result['confidence'])
-            
+                st.metric("Company Score", f"{company_result['score']}/10")
             with col4:
-                beta = result['stock_beta']
-                beta_type = "High-Beta" if beta > 1.5 else "Growth" if beta > 1.2 else "Market" if beta > 0.8 else "Defensive"
-                st.metric("Beta", f"{beta:.2f}", help=f"{beta_type} stock")
+                st.metric("Beta", f"{monetary_result['beta']:.2f}")
             
             # Gauge chart
-            st.markdown("---")
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
-                value=result['composite_score'],
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': "Monetary Factor Score"},
+                value=combined_score,
+                title={'text': f"{ticker} Overall Score"},
                 gauge={
                     'axis': {'range': [0, 10]},
                     'bar': {'color': "darkblue"},
@@ -408,61 +258,143 @@ else:
                     ]
                 }
             ))
-            fig.update_layout(height=300)
             st.plotly_chart(fig, use_container_width=True)
             
-            # Factor breakdown
-            st.markdown("---")
-            st.subheader("📋 Factor Breakdown")
+            st.markdown("### 📊 Module Breakdown")
+            col1, col2 = st.columns(2)
             
-            factors = result['factors']
+            with col1:
+                st.markdown("#### 💰 Monetary Factors")
+                st.metric("Score", f"{monetary_result['score']}/10")
+                st.write(f"**Signal:** {monetary_result['signal']}")
+                if monetary_result['fed']:
+                    st.write(f"Fed Rate: {monetary_result['fed']['current']:.2f}%")
+                if monetary_result['inf']:
+                    st.write(f"Inflation: {monetary_result['inf']['yoy']:.2f}%")
+            
+            with col2:
+                st.markdown("#### 📄 Company Performance")
+                st.metric("Score", f"{company_result['score']}/10")
+                st.write(f"**Signal:** {company_result['signal']}")
+        else:
+            st.error("Unable to complete analysis")
+    
+    # TAB 2: Monetary Analysis
+    with tab2:
+        if monetary_result['success']:
+            st.markdown(f"## 💰 Monetary Factor Analysis: {ticker}")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Score", f"{monetary_result['score']}/10")
+            with col2:
+                st.metric("Signal", monetary_result['signal'])
+            with col3:
+                st.metric("Beta", f"{monetary_result['beta']:.2f}")
+            
+            st.markdown("### Factor Scores")
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.markdown("#### 🏦 Fed Rate")
-                st.metric("Score", f"{factors['fed_rate']['score']:+.1f}/2.0")
-                st.caption(factors['fed_rate']['reasoning'])
-                if factors['fed_rate']['data']:
-                    st.info(f"Current: **{factors['fed_rate']['data']['current_rate']:.2f}%**")
+                st.metric("Score", f"{monetary_result['fed_score']:+.1f}/2.0")
+                if monetary_result['fed']:
+                    st.info(f"Current: {monetary_result['fed']['current']:.2f}%")
             
             with col2:
                 st.markdown("#### 📊 Inflation")
-                st.metric("Score", f"{factors['inflation']['score']:+.1f}/2.0")
-                st.caption(factors['inflation']['reasoning'])
-                if factors['inflation']['data']:
-                    st.info(f"YoY: **{factors['inflation']['data']['yoy_inflation']:.2f}%**")
+                st.metric("Score", f"{monetary_result['inf_score']:+.1f}/2.0")
+                if monetary_result['inf']:
+                    st.info(f"YoY: {monetary_result['inf']['yoy']:.2f}%")
             
             with col3:
-                st.markdown("#### 📈 Treasury Yield")
-                st.metric("Score", f"{factors['treasury_yield']['score']:+.1f}/2.0")
-                st.caption(factors['treasury_yield']['reasoning'])
-                if factors['treasury_yield']['data']:
-                    st.info(f"Current: **{factors['treasury_yield']['data']['current_yield']:.2f}%**")
+                st.markdown("#### 📈 Yields")
+                st.metric("Score", f"{monetary_result['yld_score']:+.1f}/2.0")
+                if monetary_result['yld']:
+                    st.info(f"10Y: {monetary_result['yld']['current']:.2f}%")
+    
+    # TAB 3: Company Analysis
+    with tab3:
+        if company_result['success']:
+            st.markdown(f"## 📄 Company Performance Analysis: {ticker}")
             
-            # Historical charts
-            st.markdown("---")
-            st.subheader("📈 Historical Indicators")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Company Score", f"{company_result['score']}/10")
+            with col2:
+                st.metric("Signal", company_result['signal'])
             
-            tab1, tab2, tab3 = st.tabs(["Fed Funds", "CPI", "10Y Treasury"])
+            st.markdown("### Performance Factors")
             
-            with tab1:
-                if factors['fed_rate']['data']:
-                    st.line_chart(factors['fed_rate']['data'])
+            factors = company_result['factors']
             
-            with tab2:
-                if factors['inflation']['data']:
-                    st.line_chart(factors['inflation']['data'])
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("#### 📊 Revenue Growth")
+                st.metric("Score", f"{factors['revenue_growth']['score']:+.1f}/2.0")
+                st.caption(factors['revenue_growth']['reasoning'])
+                
+                st.markdown("#### 💰 Profitability")
+                st.metric("Score", f"{factors['profitability']['score']:+.1f}/2.0")
+                st.caption(factors['profitability']['reasoning'])
             
-            with tab3:
-                if factors['treasury_yield']['data']:
-                    st.line_chart(factors['treasury_yield']['data'])
+            with col2:
+                st.markdown("#### 📈 Margins")
+                st.metric("Score", f"{factors['margins']['score']:+.1f}/2.0")
+                st.caption(factors['margins']['reasoning'])
+                
+                st.markdown("#### 🏥 Financial Health")
+                st.metric("Score", f"{factors['financial_health']['score']:+.1f}/2.0")
+                st.caption(factors['financial_health']['reasoning'])
+            
+            with col3:
+                st.markdown("#### 🎯 Guidance")
+                st.metric("Score", f"{factors['guidance']['score']:+.1f}/2.0")
+                st.caption(factors['guidance']['reasoning'])
+        else:
+            st.error(f"Error: {company_result.get('error', 'Unknown error')}")
 
 # Disclaimer
 st.markdown("---")
 st.markdown("""
-<div class="disclaimer">
+<div style="background-color: #fff3cd; padding: 1rem; border-radius: 0.5rem;">
     <strong>⚠️ DISCLAIMER</strong><br>
     For educational purposes only. NOT investment advice. 
     Consult a qualified financial advisor before making investment decisions.
 </div>
 """, unsafe_allow_html=True)
+```
+
+**Commit the changes.**
+
+---
+
+## 🔧 **Step 3: Update `requirements.txt`**
+
+**Edit `requirements.txt`** in GitHub:
+```
+yfinance
+fredapi
+pandas
+numpy
+plotly>=5.0.0
+streamlit>=1.30.0
+altair<5
+edgartools
+```
+
+**Commit the changes.**
+
+---
+
+## 🚀 **Step 4: Deploy to Streamlit Cloud**
+
+### **Your app will AUTO-REDEPLOY!**
+
+Once you commit all the changes, Streamlit Cloud will automatically detect them and redeploy (takes 2-3 minutes).
+
+Watch the logs - you should see:
+```
+📦 Processing dependencies...
+Installing edgartools...
+✅ Deployment successful!
