@@ -364,37 +364,3 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 ```
-
-**Commit the changes.**
-
----
-
-## 🔧 **Step 3: Update `requirements.txt`**
-
-**Edit `requirements.txt`** in GitHub:
-```
-yfinance
-fredapi
-pandas
-numpy
-plotly>=5.0.0
-streamlit>=1.30.0
-altair<5
-edgartools
-```
-
-**Commit the changes.**
-
----
-
-## 🚀 **Step 4: Deploy to Streamlit Cloud**
-
-### **Your app will AUTO-REDEPLOY!**
-
-Once you commit all the changes, Streamlit Cloud will automatically detect them and redeploy (takes 2-3 minutes).
-
-Watch the logs - you should see:
-```
-📦 Processing dependencies...
-Installing edgartools...
-✅ Deployment successful!
