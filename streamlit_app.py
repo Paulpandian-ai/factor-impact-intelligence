@@ -363,4 +363,3 @@ st.markdown("""
     Consult a qualified financial advisor before making investment decisions.
 </div>
 """, unsafe_allow_html=True)
-```
