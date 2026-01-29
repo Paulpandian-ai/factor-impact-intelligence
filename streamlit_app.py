@@ -237,7 +237,15 @@ if analyze_btn and ticker:
             with col1:
                 st.metric("Combined Score", f"{combined_score}/10")
             with col2:
-                st.metric("Monetary Score", f"{monetary_result['score']}/10")
+                st.metric("Signal", company_result['signal'])
+    
+    # Add data timestamp
+    if company_result.get('data_date'):
+        st.caption(f"📅 Data from: {company_result['data_date']}")
+        st.caption(f"🕐 Age: {company_result['data_age_days']} days")
+        
+        if company_result.get('is_stale'):
+            st.warning("⚠️ Data is >6 months old - use caution")
             with col3:
                 st.metric("Company Score", f"{company_result['score']}/10")
             with col4:
