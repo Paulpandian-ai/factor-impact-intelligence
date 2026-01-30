@@ -229,38 +229,39 @@ if analyze_btn and ticker:
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary", "💰 Monetary", "📄 Company", "🏭 Suppliers"])
     
     with st.spinner(f"Analyzing {ticker} across all modules..."):
-        # Run both analyses
+        # Monetary Analysis
         monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
-        company_analyzer = CompanyPerformanceAnalyzer()
-        
         try:
             monetary_result = monetary_analyzer.analyze(ticker)
         except Exception as e:
             monetary_result = {'success': False, 'error': str(e)}
         
+        # Company Analysis
+        company_analyzer = CompanyPerformanceAnalyzer()
         try:
             company_result = company_analyzer.analyze(ticker, verbose=False)
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
-# After company_result
-try:
-    if anthropic_api_key:
-        supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
-        supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
-    else:
-        supplier_result = {'success': False, 'error': 'Anthropic API key required'}
-except Exception as e:
-    supplier_result = {'success': False, 'error': str(e)}
+        
+        # Supplier Analysis
+        try:
+            if anthropic_api_key:
+                supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
+                supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
+            else:
+                supplier_result = {'success': False, 'error': 'Anthropic API key required'}
+        except Exception as e:
+            supplier_result = {'success': False, 'error': str(e)}
     
-# TAB 1: Summary
-with tab1:
-    st.markdown(f"## {ticker} - Multi-Module Analysis")
-    
-    # Check which modules succeeded
-    monetary_ok = monetary_result.get('success', False)
-    company_ok = company_result.get('success', False)
-    supplier_ok = supplier_result.get('success', False)
-    
+    # TAB 1: Summary
+    with tab1:
+        st.markdown(f"## {ticker} - Multi-Module Analysis")
+        
+        # Check which modules succeeded
+        monetary_ok = monetary_result.get('success', False)
+        company_ok = company_result.get('success', False)
+        supplier_ok = supplier_result.get('success', False)
+          
     if monetary_ok or company_ok or supplier_ok:
         # Calculate combined score based on available modules
         scores = []
