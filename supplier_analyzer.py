@@ -1,5 +1,5 @@
 """
-Supplier Analysis Module - Module 2
+Supplier Analysis Module - Module 2 (FIXED)
 Uses Claude AI to identify and analyze supplier relationships
 """
 
@@ -13,7 +13,7 @@ import re
 from typing import List, Dict, Optional
 
 # Set Edgar identity
-set_identity("Paul Balasubramanian factorimpactai@gmail.com")
+set_identity("Paul Balasubramanian pb2963@columbia.edu")
 
 
 class SupplierAnalyzer:
@@ -34,28 +34,56 @@ class SupplierAnalyzer:
         """Fetch the latest 10-K filing"""
         try:
             company = Company(ticker)
+            
+            # Get latest 10-K filings
             tenk_filings = company.get_filings(form="10-K").latest(1)
             
-            if not tenk_filings:
-                return None
+            if not tenk_filings or len(tenk_filings) == 0:
+                return {
+                    'success': False,
+                    'error': 'No 10-K filings found',
+                    'ticker': ticker.upper()
+                }
             
-            filing = tenk_filings[0]
+            # Get the first filing from the Filings object
+            filing = None
+            for f in tenk_filings:
+                filing = f
+                break
+            
+            if not filing:
+                return {
+                    'success': False,
+                    'error': 'Could not access filing',
+                    'ticker': ticker.upper()
+                }
             
             # Get full text (this may take a moment)
-            full_text = filing.text()
+            try:
+                full_text = filing.text()
+            except:
+                # Fallback: try to get HTML and extract text
+                try:
+                    full_text = str(filing.html())
+                except:
+                    return {
+                        'success': False,
+                        'error': 'Could not extract filing text',
+                        'ticker': ticker.upper()
+                    }
             
             return {
                 'success': True,
                 'company_name': company.name,
                 'ticker': ticker.upper(),
-                'filing_date': filing.filing_date,
+                'filing_date': str(filing.filing_date),
                 'full_text': full_text[:500000],  # Limit to ~500K chars for API limits
                 'accession_number': filing.accession_number
             }
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e),
+                'error': f"Error fetching 10-K: {str(e)}",
                 'ticker': ticker.upper()
             }
     
@@ -195,19 +223,34 @@ Only return valid JSON, no other text."""
         
         try:
             company = Company(supplier_ticker)
+            
+            # Try 10-K first
             tenk = company.get_filings(form="10-K").latest(1)
             
-            if not tenk:
+            filing = None
+            if tenk and len(tenk) > 0:
+                for f in tenk:
+                    filing = f
+                    break
+            else:
                 # Try 10-Q if 10-K not available
                 tenq = company.get_filings(form="10-Q").latest(1)
-                if not tenq:
-                    return None
-                filing = tenq[0]
-            else:
-                filing = tenk[0]
+                if tenq and len(tenq) > 0:
+                    for f in tenq:
+                        filing = f
+                        break
+            
+            if not filing:
+                return None
             
             # Get full text
-            full_text = filing.text()
+            try:
+                full_text = filing.text()
+            except:
+                try:
+                    full_text = str(filing.html())
+                except:
+                    return None
             
             # Extract MD&A section (Item 7 for 10-K, Item 2 for 10-Q)
             # Simple regex extraction - Claude will analyze the content
@@ -500,24 +543,3 @@ Only return valid JSON."""
             'tokens_used': total_tokens,
             'estimated_cost': total_tokens * 0.003 / 1000  # $3 per 1M input tokens
         }
-
-
-# Test function
-if __name__ == "__main__":
-    import os
-    
-    # You'll need to set ANTHROPIC_API_KEY environment variable
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    
-    if not api_key:
-        print("❌ Please set ANTHROPIC_API_KEY environment variable")
-    else:
-        analyzer = SupplierAnalyzer(api_key)
-        result = analyzer.analyze("NVDA")
-        
-        if result['success']:
-            print(f"\nSupplier Risk Score: {result['score']}/10")
-            print(f"Risk Level: {result['signal']}")
-            print(f"\nTop Suppliers:")
-            for s in result['suppliers']:
-                print(f"  • {s['name']}: {s['score']:+.1f}/2.0")
