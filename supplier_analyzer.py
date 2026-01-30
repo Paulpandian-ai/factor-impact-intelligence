@@ -13,7 +13,7 @@ import re
 from typing import List, Dict, Optional
 
 # Set Edgar identity
-set_identity("Paul Balasubramanian pb2963@columbia.edu")
+set_identity("Paul Balasubramanian factorimpactai@gmail.com")
 
 
 class SupplierAnalyzer:
