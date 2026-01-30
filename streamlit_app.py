@@ -243,14 +243,14 @@ if analyze_btn and ticker:
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
 # After company_result
-        try:
-            if anthropic_api_key:
-            supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
-            supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
-        else:
-            supplier_result = {'success': False, 'error': 'Anthropic API key required'}
-        except Exception as e:
-            supplier_result = {'success': False, 'error': str(e)}
+try:
+    if anthropic_api_key:
+        supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
+        supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
+    else:
+        supplier_result = {'success': False, 'error': 'Anthropic API key required'}
+except Exception as e:
+    supplier_result = {'success': False, 'error': str(e)}
     
 # TAB 1: Summary
 with tab1:
