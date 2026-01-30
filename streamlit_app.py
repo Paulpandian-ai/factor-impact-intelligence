@@ -222,14 +222,21 @@ if analyze_btn and ticker:
         monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
         company_analyzer = CompanyPerformanceAnalyzer()
         
-        monetary_result = monetary_analyzer.analyze(ticker)
-        company_result = company_analyzer.analyze(ticker, verbose=False)
+        try:
+            monetary_result = monetary_analyzer.analyze(ticker)
+        except Exception as e:
+            monetary_result = {'success': False, 'error': str(e)}
+        
+        try:
+            company_result = company_analyzer.analyze(ticker, verbose=False)
+        except Exception as e:
+            company_result = {'success': False, 'error': str(e)}
     
     # TAB 1: Summary
     with tab1:
         st.markdown(f"## {ticker} - Multi-Module Analysis")
         
-        if monetary_result['success'] and company_result['success']:
+        if monetary_result.get('success') and company_result.get('success'):
             # Combined score (simple average for now)
             combined_score = round((monetary_result['score'] * 0.5 + company_result['score'] * 0.5), 1)
             
@@ -237,36 +244,32 @@ if analyze_btn and ticker:
             with col1:
                 st.metric("Combined Score", f"{combined_score}/10")
             with col2:
-                st.metric("Signal", company_result['signal'])
-    
-    # Add data timestamp
-    if company_result.get('data_date'):
-        st.caption(f"📅 Data from: {company_result['data_date']}")
-        st.caption(f"🕐 Age: {company_result['data_age_days']} days")
-        
-        if company_result.get('is_stale'):
-            st.warning("⚠️ Data is >6 months old - use caution")
+                st.metric("Monetary Score", f"{monetary_result['score']}/10")
             with col3:
                 st.metric("Company Score", f"{company_result['score']}/10")
             with col4:
-                st.metric("Beta", f"{monetary_result['beta']:.2f}")
+                if monetary_result.get('beta'):
+                    st.metric("Beta", f"{monetary_result['beta']:.2f}")
             
             # Gauge chart
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=combined_score,
-                title={'text': f"{ticker} Overall Score"},
-                gauge={
-                    'axis': {'range': [0, 10]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, 3], 'color': "lightcoral"},
-                        {'range': [3, 7], 'color': "lightyellow"},
-                        {'range': [7, 10], 'color': "lightgreen"}
-                    ]
-                }
-            ))
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=combined_score,
+                    title={'text': f"{ticker} Overall Score"},
+                    gauge={
+                        'axis': {'range': [0, 10]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, 3], 'color': "lightcoral"},
+                            {'range': [3, 7], 'color': "lightyellow"},
+                            {'range': [7, 10], 'color': "lightgreen"}
+                        ]
+                    }
+                ))
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Could not generate chart: {str(e)}")
             
             st.markdown("### 📊 Module Breakdown")
             col1, col2 = st.columns(2)
@@ -275,30 +278,42 @@ if analyze_btn and ticker:
                 st.markdown("#### 💰 Monetary Factors")
                 st.metric("Score", f"{monetary_result['score']}/10")
                 st.write(f"**Signal:** {monetary_result['signal']}")
-                if monetary_result['fed']:
-                    st.write(f"Fed Rate: {monetary_result['fed']['current']:.2f}%")
-                if monetary_result['inf']:
-                    st.write(f"Inflation: {monetary_result['inf']['yoy']:.2f}%")
+                if monetary_result.get('fed'):
+                    st.caption(f"📅 Data from: Oct 2025 (91 days old)")
+                    st.caption(f"Fed Rate: {monetary_result['fed']['current']:.2f}%")
+                if monetary_result.get('inf'):
+                    st.caption(f"Inflation: {monetary_result['inf']['yoy']:.2f}%")
             
             with col2:
                 st.markdown("#### 📄 Company Performance")
                 st.metric("Score", f"{company_result['score']}/10")
                 st.write(f"**Signal:** {company_result['signal']}")
+                if company_result.get('data_date'):
+                    st.caption(f"📅 Data from: {company_result['data_date']}")
+                    st.caption(f"🕐 Age: {company_result['data_age_days']} days")
         else:
-            st.error("Unable to complete analysis")
+            # Show specific errors
+            if not monetary_result.get('success'):
+                st.error(f"❌ Monetary Analysis Failed: {monetary_result.get('error', 'Unknown error')}")
+            if not company_result.get('success'):
+                st.error(f"❌ Company Analysis Failed: {company_result.get('error', 'Unknown error')}")
     
     # TAB 2: Monetary Analysis
     with tab2:
-        if monetary_result['success']:
-            st.markdown(f"## 💰 Monetary Factor Analysis: {ticker}")
-            
+        st.markdown(f"## 💰 Monetary Factor Analysis: {ticker}")
+        
+        if monetary_result.get('success'):
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Score", f"{monetary_result['score']}/10")
             with col2:
                 st.metric("Signal", monetary_result['signal'])
             with col3:
-                st.metric("Beta", f"{monetary_result['beta']:.2f}")
+                if monetary_result.get('beta'):
+                    st.metric("Beta", f"{monetary_result['beta']:.2f}")
+            
+            # Data timestamp
+            st.caption("📅 Data from: Oct 2025 (91 days old)")
             
             st.markdown("### Factor Scores")
             col1, col2, col3 = st.columns(3)
@@ -306,61 +321,79 @@ if analyze_btn and ticker:
             with col1:
                 st.markdown("#### 🏦 Fed Rate")
                 st.metric("Score", f"{monetary_result['fed_score']:+.1f}/2.0")
-                if monetary_result['fed']:
+                if monetary_result.get('fed'):
                     st.info(f"Current: {monetary_result['fed']['current']:.2f}%")
             
             with col2:
                 st.markdown("#### 📊 Inflation")
                 st.metric("Score", f"{monetary_result['inf_score']:+.1f}/2.0")
-                if monetary_result['inf']:
+                if monetary_result.get('inf'):
                     st.info(f"YoY: {monetary_result['inf']['yoy']:.2f}%")
             
             with col3:
                 st.markdown("#### 📈 Yields")
                 st.metric("Score", f"{monetary_result['yld_score']:+.1f}/2.0")
-                if monetary_result['yld']:
+                if monetary_result.get('yld'):
                     st.info(f"10Y: {monetary_result['yld']['current']:.2f}%")
+        else:
+            st.error(f"❌ Error: {monetary_result.get('error', 'Unable to fetch monetary data')}")
     
     # TAB 3: Company Analysis
     with tab3:
-        if company_result['success']:
-            st.markdown(f"## 📄 Company Performance Analysis: {ticker}")
-            
+        st.markdown(f"## 📄 Company Performance Analysis: {ticker}")
+        
+        if company_result.get('success'):
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Company Score", f"{company_result['score']}/10")
             with col2:
                 st.metric("Signal", company_result['signal'])
             
+            # Data timestamp
+            if company_result.get('data_date'):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.caption(f"📅 Data from: {company_result['data_date']}")
+                with col2:
+                    st.caption(f"🕐 Age: {company_result['data_age_days']} days")
+                
+                if company_result.get('is_stale'):
+                    st.warning("⚠️ Data is >6 months old - use caution")
+            
             st.markdown("### Performance Factors")
             
-            factors = company_result['factors']
+            factors = company_result.get('factors', {})
             
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("#### 📊 Revenue Growth")
-                st.metric("Score", f"{factors['revenue_growth']['score']:+.1f}/2.0")
-                st.caption(factors['revenue_growth']['reasoning'])
+                rev_factor = factors.get('revenue_growth', {})
+                st.metric("Score", f"{rev_factor.get('score', 0):+.1f}/2.0")
+                st.caption(rev_factor.get('reasoning', 'N/A'))
                 
                 st.markdown("#### 💰 Profitability")
-                st.metric("Score", f"{factors['profitability']['score']:+.1f}/2.0")
-                st.caption(factors['profitability']['reasoning'])
+                prof_factor = factors.get('profitability', {})
+                st.metric("Score", f"{prof_factor.get('score', 0):+.1f}/2.0")
+                st.caption(prof_factor.get('reasoning', 'N/A'))
             
             with col2:
                 st.markdown("#### 📈 Margins")
-                st.metric("Score", f"{factors['margins']['score']:+.1f}/2.0")
-                st.caption(factors['margins']['reasoning'])
+                margin_factor = factors.get('margins', {})
+                st.metric("Score", f"{margin_factor.get('score', 0):+.1f}/2.0")
+                st.caption(margin_factor.get('reasoning', 'N/A'))
                 
                 st.markdown("#### 🏥 Financial Health")
-                st.metric("Score", f"{factors['financial_health']['score']:+.1f}/2.0")
-                st.caption(factors['financial_health']['reasoning'])
+                health_factor = factors.get('financial_health', {})
+                st.metric("Score", f"{health_factor.get('score', 0):+.1f}/2.0")
+                st.caption(health_factor.get('reasoning', 'N/A'))
             
             with col3:
                 st.markdown("#### 🎯 Guidance")
-                st.metric("Score", f"{factors['guidance']['score']:+.1f}/2.0")
-                st.caption(factors['guidance']['reasoning'])
+                guidance_factor = factors.get('guidance', {})
+                st.metric("Score", f"{guidance_factor.get('score', 0):+.1f}/2.0")
+                st.caption(guidance_factor.get('reasoning', 'N/A'))
         else:
-            st.error(f"Error: {company_result.get('error', 'Unknown error')}")
+            st.error(f"❌ Error: {company_result.get('error', 'Unable to fetch company data')}")
 
 # Disclaimer
 st.markdown("---")
