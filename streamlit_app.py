@@ -33,6 +33,16 @@ with st.sidebar:
     else:
         fred_api_key = st.text_input("FRED API Key", type="password", 
                                      help="Get free key at fred.stlouisfed.org")
+
+    # After the FRED API key section
+    st.markdown("---")
+
+    if 'ANTHROPIC_API_KEY' in st.secrets:
+        anthropic_api_key = st.secrets['ANTHROPIC_API_KEY']
+        st.success("✅ Anthropic API loaded")
+    else:
+        anthropic_api_key = st.text_input("Anthropic API Key", type="password",
+                                       help="Get key at console.anthropic.com")
     
     st.markdown("---")
     st.markdown("""
@@ -216,7 +226,7 @@ with col2:
 
 if analyze_btn and ticker:
     # Create tabs for different modules
-    tab1, tab2, tab3 = st.tabs(["📊 Summary", "💰 Monetary Analysis", "📄 Company Analysis"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary", "💰 Monetary", "📄 Company", "🏭 Suppliers"])
     
     with st.spinner(f"Analyzing {ticker} across all modules..."):
         # Run both analyses
@@ -232,72 +242,270 @@ if analyze_btn and ticker:
             company_result = company_analyzer.analyze(ticker, verbose=False)
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
-    
-    # TAB 1: Summary
-    with tab1:
-        st.markdown(f"## {ticker} - Multi-Module Analysis")
-        
-        if monetary_result.get('success') and company_result.get('success'):
-            # Combined score (simple average for now)
-            combined_score = round((monetary_result['score'] * 0.5 + company_result['score'] * 0.5), 1)
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Combined Score", f"{combined_score}/10")
-            with col2:
-                st.metric("Monetary Score", f"{monetary_result['score']}/10")
-            with col3:
-                st.metric("Company Score", f"{company_result['score']}/10")
-            with col4:
-                if monetary_result.get('beta'):
-                    st.metric("Beta", f"{monetary_result['beta']:.2f}")
-            
-            # Gauge chart
-            try:
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=combined_score,
-                    title={'text': f"{ticker} Overall Score"},
-                    gauge={
-                        'axis': {'range': [0, 10]},
-                        'bar': {'color': "darkblue"},
-                        'steps': [
-                            {'range': [0, 3], 'color': "lightcoral"},
-                            {'range': [3, 7], 'color': "lightyellow"},
-                            {'range': [7, 10], 'color': "lightgreen"}
-                        ]
-                    }
-                ))
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not generate chart: {str(e)}")
-            
-            st.markdown("### 📊 Module Breakdown")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 💰 Monetary Factors")
-                st.metric("Score", f"{monetary_result['score']}/10")
-                st.write(f"**Signal:** {monetary_result['signal']}")
-                if monetary_result.get('fed'):
-                    st.caption(f"📅 Data from: Oct 2025 (91 days old)")
-                    st.caption(f"Fed Rate: {monetary_result['fed']['current']:.2f}%")
-                if monetary_result.get('inf'):
-                    st.caption(f"Inflation: {monetary_result['inf']['yoy']:.2f}%")
-            
-            with col2:
-                st.markdown("#### 📄 Company Performance")
-                st.metric("Score", f"{company_result['score']}/10")
-                st.write(f"**Signal:** {company_result['signal']}")
-                if company_result.get('data_date'):
-                    st.caption(f"📅 Data from: {company_result['data_date']}")
-                    st.caption(f"🕐 Age: {company_result['data_age_days']} days")
+# After company_result
+        try:
+            if anthropic_api_key:
+            supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
+            supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
         else:
-            # Show specific errors
-            if not monetary_result.get('success'):
-                st.error(f"❌ Monetary Analysis Failed: {monetary_result.get('error', 'Unknown error')}")
-            if not company_result.get('success'):
-                st.error(f"❌ Company Analysis Failed: {company_result.get('error', 'Unknown error')}")
+            supplier_result = {'success': False, 'error': 'Anthropic API key required'}
+        except Exception as e:
+            supplier_result = {'success': False, 'error': str(e)}
+    
+# TAB 1: Summary
+with tab1:
+    st.markdown(f"## {ticker} - Multi-Module Analysis")
+    
+    # Check which modules succeeded
+    monetary_ok = monetary_result.get('success', False)
+    company_ok = company_result.get('success', False)
+    supplier_ok = supplier_result.get('success', False)
+    
+    if monetary_ok or company_ok or supplier_ok:
+        # Calculate combined score based on available modules
+        scores = []
+        weights = []
+        
+        if monetary_ok:
+            scores.append(monetary_result['score'])
+            weights.append(0.4)  # 40% weight
+        
+        if company_ok:
+            scores.append(company_result['score'])
+            weights.append(0.35)  # 35% weight
+        
+        if supplier_ok:
+            # Supplier score is risk-based, so invert it
+            # High supplier score = low risk = good
+            # We already have it on 1-10 scale, so use directly
+            scores.append(supplier_result['score'])
+            weights.append(0.25)  # 25% weight
+        
+        # Normalize weights if not all modules available
+        total_weight = sum(weights)
+        normalized_weights = [w/total_weight for w in weights]
+        
+        # Calculate weighted average
+        combined_score = round(sum(s*w for s, w in zip(scores, normalized_weights)), 1)
+        
+        # Overall signal
+        if combined_score >= 7.5:
+            overall_signal = "STRONG BUY"
+        elif combined_score >= 6.5:
+            overall_signal = "BUY"
+        elif combined_score >= 5.5:
+            overall_signal = "HOLD (Lean Buy)"
+        elif combined_score >= 4.5:
+            overall_signal = "HOLD"
+        else:
+            overall_signal = "SELL"
+        
+        # Display metrics
+        st.markdown("### 🎯 Overall Assessment")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Combined Score", f"{combined_score}/10", help="Weighted average of all active modules")
+        with col2:
+            st.metric("Overall Signal", overall_signal)
+        with col3:
+            modules_active = sum([monetary_ok, company_ok, supplier_ok])
+            st.metric("Modules Active", f"{modules_active}/3")
+        
+        # Gauge chart
+        try:
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=combined_score,
+                title={'text': f"{ticker} Overall Score", 'font': {'size': 20}},
+                gauge={
+                    'axis': {'range': [0, 10]},
+                    'bar': {'color': "darkblue"},
+                    'steps': [
+                        {'range': [0, 3], 'color': "#ffcccc"},
+                        {'range': [3, 5], 'color': "#ffe6cc"},
+                        {'range': [5, 7], 'color': "#ffffcc"},
+                        {'range': [7, 8.5], 'color': "#ccffcc"},
+                        {'range': [8.5, 10], 'color': "#99ff99"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': combined_score
+                    }
+                }
+            ))
+            fig.update_layout(height=300)
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not generate chart: {str(e)}")
+        
+        st.markdown("---")
+        st.markdown("### 📊 Module Breakdown")
+        
+        # Create columns based on how many modules are active
+        if supplier_ok:
+            col1, col2, col3 = st.columns(3)
+        else:
+            col1, col2 = st.columns(2)
+        
+        # Monetary Module
+        with col1:
+            if monetary_ok:
+                score = monetary_result['score']
+                signal = monetary_result['signal']
+                
+                # Color based on score
+                if score >= 7.5:
+                    color = "🟢"
+                elif score >= 6.5:
+                    color = "🟡"
+                else:
+                    color = "🔴"
+                
+                st.markdown(f"#### {color} Monetary Factors")
+                st.metric("Score", f"{score}/10")
+                st.caption(f"**Signal:** {signal}")
+                
+                if monetary_result.get('beta'):
+                    st.caption(f"Beta: {monetary_result['beta']:.2f}")
+                
+                if monetary_result.get('fed'):
+                    st.caption(f"Fed: {monetary_result['fed']['current']:.2f}%")
+                if monetary_result.get('inf'):
+                    st.caption(f"CPI: {monetary_result['inf']['yoy']:.2f}%")
+                
+                st.caption("📅 Data: Oct 2025")
+            else:
+                st.markdown("#### ⚪ Monetary Factors")
+                st.error("Analysis failed")
+        
+        # Company Module
+        with col2:
+            if company_ok:
+                score = company_result['score']
+                signal = company_result['signal']
+                
+                if score >= 7.5:
+                    color = "🟢"
+                elif score >= 6.5:
+                    color = "🟡"
+                else:
+                    color = "🔴"
+                
+                st.markdown(f"#### {color} Company Performance")
+                st.metric("Score", f"{score}/10")
+                st.caption(f"**Signal:** {signal}")
+                
+                if company_result.get('data_date'):
+                    st.caption(f"📅 Data: {company_result['data_date']}")
+                    st.caption(f"🕐 {company_result['data_age_days']} days old")
+            else:
+                st.markdown("#### ⚪ Company Performance")
+                st.error("Analysis failed")
+        
+        # Supplier Module (if available)
+        if supplier_ok:
+            with col3:
+                score = supplier_result['score']
+                signal = supplier_result['signal']
+                
+                # For supplier risk, LOWER score = HIGHER risk
+                # So color logic is inverted
+                if score >= 7.0:
+                    color = "🟢"  # Low risk
+                elif score >= 5.5:
+                    color = "🟡"  # Moderate risk
+                else:
+                    color = "🔴"  # High risk
+                
+                st.markdown(f"#### {color} Supplier Analysis")
+                st.metric("Risk Score", f"{score}/10")
+                st.caption(f"**Risk Level:** {signal}")
+                
+                suppliers_count = len(supplier_result.get('suppliers', []))
+                st.caption(f"Suppliers: {suppliers_count}")
+                
+                if supplier_result.get('filing_date'):
+                    st.caption(f"📅 10-K: {supplier_result['filing_date']}")
+                
+                if supplier_result.get('estimated_cost'):
+                    st.caption(f"💰 Cost: ${supplier_result['estimated_cost']:.3f}")
+        
+        # Key insights section
+        st.markdown("---")
+        st.markdown("### 💡 Key Insights")
+        
+        insights = []
+        
+        # Generate insights based on scores
+        if monetary_ok and monetary_result['score'] >= 7.0:
+            insights.append("✅ **Favorable monetary conditions** - Fed policy and inflation trends support growth")
+        elif monetary_ok and monetary_result['score'] < 5.0:
+            insights.append("⚠️ **Challenging monetary environment** - Rate pressures and inflation concerns")
+        
+        if company_ok and company_result['score'] >= 7.5:
+            insights.append("✅ **Strong company fundamentals** - Excellent revenue growth and profitability")
+        elif company_ok and company_result['score'] < 5.0:
+            insights.append("⚠️ **Company performance concerns** - Weak financials or deteriorating metrics")
+        
+        if supplier_ok:
+            if supplier_result['score'] >= 7.0:
+                insights.append("✅ **Low supplier risk** - Diversified supplier base with healthy financials")
+            elif supplier_result['score'] < 5.5:
+                insights.append("⚠️ **Elevated supplier risk** - Concentration concerns or supplier financial stress")
+            
+            # Add key findings from supplier analysis
+            if supplier_result.get('key_findings'):
+                insights.append("**Supplier findings:**")
+                for finding in supplier_result['key_findings'][:2]:  # Top 2
+                    insights.append(f"  • {finding}")
+        
+        # Display insights
+        if insights:
+            for insight in insights:
+                st.markdown(insight)
+        else:
+            st.info("Run all modules for comprehensive insights")
+        
+        # Module weights disclosure
+        st.markdown("---")
+        with st.expander("📋 How is the combined score calculated?"):
+            st.markdown("""
+            **Scoring Methodology:**
+            
+            The combined score is a weighted average of active modules:
+            
+            - **Monetary Factors:** 40% weight
+              - Fed policy, inflation, Treasury yields
+              - Measures macroeconomic tailwinds/headwinds
+            
+            - **Company Performance:** 35% weight
+              - Revenue, profitability, margins, financial health, guidance
+              - Measures fundamental business strength
+            
+            - **Supplier Analysis:** 25% weight
+              - Supplier concentration, financial health, risks
+              - Measures supply chain resilience (lower = higher risk)
+            
+            **Note:** Weights are automatically adjusted if modules are unavailable.
+            
+            **Example:**
+            - Monetary: 7.1/10 × 40% = 2.84
+            - Company: 9.6/10 × 35% = 3.36
+            - Supplier: 6.5/10 × 25% = 1.63
+            - **Combined: 7.83/10 → STRONG BUY**
+            """)
+    else:
+        st.error("❌ All modules failed. Please check API keys and try again.")
+        
+        # Show specific errors
+        if not monetary_ok:
+            st.error(f"Monetary: {monetary_result.get('error', 'Unknown error')}")
+        if not company_ok:
+            st.error(f"Company: {company_result.get('error', 'Unknown error')}")
+        if not supplier_ok:
+            st.error(f"Supplier: {supplier_result.get('error', 'Unknown error')}")
     
     # TAB 2: Monetary Analysis
     with tab2:
@@ -396,6 +604,126 @@ if analyze_btn and ticker:
         else:
             st.error(f"❌ Error: {company_result.get('error', 'Unable to fetch company data')}")
 
+# TAB 4: Supplier Analysis
+with tab4:
+    st.markdown(f"## 🏭 Supplier Analysis: {ticker}")
+    
+    if not anthropic_api_key:
+        st.warning("⚠️ Anthropic API key required for supplier analysis")
+        st.info("Add your API key in the sidebar or Streamlit secrets")
+        st.markdown("[Get API key at console.anthropic.com](https://console.anthropic.com/)")
+    elif supplier_result.get('success'):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Supplier Risk Score", f"{supplier_result['score']}/10")
+        with col2:
+            st.metric("Risk Level", supplier_result['signal'])
+        with col3:
+            st.metric("Suppliers Analyzed", len(supplier_result.get('suppliers', [])))
+        
+        # Show filing date and cost
+        st.caption(f"📅 Based on 10-K filed: {supplier_result.get('filing_date', 'N/A')}")
+        st.caption(f"💰 API Cost: ${supplier_result.get('estimated_cost', 0):.3f} ({supplier_result.get('tokens_used', 0):,} tokens)")
+        
+        # Overall assessment
+        st.markdown("### 🎯 Overall Assessment")
+        st.info(f"**Overall Supplier Risk:** {supplier_result.get('overall_supplier_risk', 'Medium')}")
+        
+        # Key findings
+        if supplier_result.get('key_findings'):
+            st.markdown("**Key Findings:**")
+            for finding in supplier_result['key_findings']:
+                st.markdown(f"• {finding}")
+        
+        st.markdown("---")
+        
+        # Individual suppliers
+        st.markdown("### 📋 Supplier Details")
+        
+        suppliers = supplier_result.get('suppliers', [])
+        
+        for i, supplier in enumerate(suppliers):
+            with st.expander(f"**{i+1}. {supplier['name']}** - Score: {supplier['score']:+.1f}/2.0", expanded=(i==0)):
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown(f"**Supplies:** {supplier.get('supplies', 'N/A')}")
+                    st.markdown(f"**Importance:** {supplier.get('importance', 'N/A')}")
+                    st.markdown(f"**Revenue Exposure:** {supplier.get('revenue_exposure', 'Not disclosed')}")
+                    
+                    if supplier.get('relationship_notes'):
+                        st.markdown(f"**Relationship:** {supplier['relationship_notes']}")
+                    
+                    if supplier.get('quote'):
+                        st.info(f"💬 \"{supplier['quote']}\"")
+                
+                with col2:
+                    # Show ticker and financial status
+                    ticker_display = supplier.get('ticker', 'PRIVATE')
+                    if ticker_display != 'PRIVATE':
+                        st.metric("Ticker", ticker_display)
+                    else:
+                        st.caption("🔒 Private Company")
+                
+                # Risks
+                if supplier.get('risks'):
+                    st.markdown("**Identified Risks:**")
+                    for risk in supplier['risks']:
+                        st.markdown(f"⚠️ {risk}")
+                
+                # Financial analysis (if available)
+                if supplier.get('financials'):
+                    st.markdown("---")
+                    st.markdown("**Financial Metrics:**")
+                    fin = supplier['financials']
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if fin.get('market_cap'):
+                            mc = fin['market_cap'] / 1e9
+                            st.metric("Market Cap", f"${mc:.1f}B")
+                    with col2:
+                        if fin.get('profit_margin'):
+                            st.metric("Profit Margin", f"{fin['profit_margin']*100:.1f}%")
+                    with col3:
+                        if fin.get('debt_to_equity'):
+                            st.metric("Debt/Equity", f"{fin['debt_to_equity']:.2f}")
+                
+                # MD&A Analysis (if available)
+                if supplier.get('mda_analysis') and supplier['mda_analysis'].get('success'):
+                    mda = supplier['mda_analysis']
+                    
+                    st.markdown("---")
+                    st.markdown("**MD&A Analysis (AI-Generated):**")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        health = mda.get('financial_health', 'Unknown')
+                        health_color = "🟢" if health == "Healthy" else "🟡" if health == "Concerning" else "🔴"
+                        st.markdown(f"**Financial Health:** {health_color} {health}")
+                    with col2:
+                        outlook = mda.get('forward_outlook', 'Unknown')
+                        outlook_color = "🟢" if outlook == "Positive" else "🟡" if outlook == "Neutral" else "🔴"
+                        st.markdown(f"**Outlook:** {outlook_color} {outlook}")
+                    with col3:
+                        reliability = mda.get('reliability_score', 0)
+                        st.metric("Reliability", f"{reliability}/10")
+                    
+                    if mda.get('summary'):
+                        st.markdown(f"**Summary:** {mda['summary']}")
+                    
+                    if mda.get('red_flags'):
+                        st.warning("**🚨 Red Flags:**")
+                        for flag in mda['red_flags']:
+                            st.markdown(f"• {flag}")
+                    
+                    if mda.get('key_risks'):
+                        with st.expander("View detailed risks"):
+                            for risk in mda['key_risks']:
+                                st.markdown(f"• {risk}")
+    else:
+        st.error(f"❌ Error: {supplier_result.get('error', 'Unable to analyze suppliers')}")
+    
 # Disclaimer
 st.markdown("---")
 st.markdown("""
