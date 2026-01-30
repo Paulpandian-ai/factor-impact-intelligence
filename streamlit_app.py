@@ -15,6 +15,7 @@ warnings.filterwarnings('ignore')
 
 # Import company analyzer
 from company_analyzer import CompanyPerformanceAnalyzer
+from supplier_analyzer import SupplierAnalyzer
 
 st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
 
@@ -38,7 +39,7 @@ with st.sidebar:
     ### Modules Active
     - ✅ Module 0: Monetary Factors
     - ✅ Module 1: Company Performance
-    - 🔲 Module 2: Supplier Analysis
+    - ✅ Module 2: Supplier Analysis  ← NEW!
     - 🔲 Module 3: Customer Analysis
     - 🔲 Module 4: Competitor Analysis
     - 🔲 Module 5: Macro Factors
