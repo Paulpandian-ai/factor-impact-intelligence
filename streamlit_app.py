@@ -1,6 +1,5 @@
 """
-Factor Impact Intelligence - Multi-Module Analysis Platform
-Modules: Monetary + Company Performance + Supplier Analysis
+Factor Impact Intelligence - Enhanced with Web Search Supplier Analysis
 """
 
 import streamlit as st
@@ -21,7 +20,7 @@ st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", la
 
 # Header
 st.markdown("# 💰 Factor Impact Intelligence")
-st.markdown("### Multi-Factor Stock Analysis Platform")
+st.markdown("### AI-Powered Multi-Factor Stock Analysis")
 
 # Sidebar
 with st.sidebar:
@@ -30,10 +29,9 @@ with st.sidebar:
     # FRED API Key
     if 'fred_api_key' in st.secrets:
         fred_api_key = st.secrets['fred_api_key']
-        st.success("✅ FRED API key loaded")
+        st.success("✅ FRED API loaded")
     else:
-        fred_api_key = st.text_input("FRED API Key", type="password", 
-                                     help="Get free key at fred.stlouisfed.org")
+        fred_api_key = st.text_input("FRED API Key", type="password")
     
     st.markdown("---")
     
@@ -42,20 +40,20 @@ with st.sidebar:
         anthropic_api_key = st.secrets['ANTHROPIC_API_KEY']
         st.success("✅ Anthropic API loaded")
     else:
-        anthropic_api_key = st.text_input("Anthropic API Key", type="password",
-                                          help="Get key at console.anthropic.com")
+        anthropic_api_key = st.text_input("Anthropic API Key", type="password")
     
     st.markdown("---")
     st.markdown("""
+    ### 🚀 Enhanced Features
+    - ✅ Web search for supplier identification
+    - ✅ Deep 10-K analysis
+    - ✅ Quantitative + Qualitative impact
+    - ✅ Opportunities, Challenges, Risks
+    
     ### Modules Active
     - ✅ Module 0: Monetary Factors
     - ✅ Module 1: Company Performance
-    - ✅ Module 2: Supplier Analysis
-    - 🔲 Module 3: Customer Analysis
-    - 🔲 Module 4: Competitor Analysis
-    - 🔲 Module 5: Macro Factors
-    - 🔲 Module 6: Correlation Analysis
-    - 🔲 Module 7: Master Agent
+    - ✅ Module 2: Enhanced Supplier Analysis
     """)
 
 
@@ -197,12 +195,8 @@ class MonetaryFactorAnalyzer:
             signal = "HOLD (Lean Buy)"
         elif composite >= 4.5:
             signal = "HOLD"
-        elif composite >= 3.5:
-            signal = "HOLD (Lean Sell)"
-        elif composite >= 2.5:
-            signal = "SELL"
         else:
-            signal = "STRONG SELL"
+            signal = "SELL"
         
         return {
             'success': True, 'ticker': ticker.upper(), 'score': composite,
@@ -219,7 +213,7 @@ if not fred_api_key:
 # Stock input
 col1, col2 = st.columns([3, 1])
 with col1:
-    ticker = st.text_input("Stock Ticker", value="NVDA", help="Enter stock symbol (e.g., NVDA, AAPL, MSFT)").upper()
+    ticker = st.text_input("Stock Ticker", value="NVDA", help="Enter stock symbol").upper()
 with col2:
     st.write("")
     st.write("")
@@ -244,7 +238,7 @@ if analyze_btn and ticker:
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
         
-        # Supplier Analysis
+        # Supplier Analysis (Enhanced with web search)
         try:
             if anthropic_api_key:
                 supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
@@ -258,13 +252,11 @@ if analyze_btn and ticker:
     with tab1:
         st.markdown(f"## {ticker} - Multi-Module Analysis")
         
-        # Check which modules succeeded
         monetary_ok = monetary_result.get('success', False)
         company_ok = company_result.get('success', False)
         supplier_ok = supplier_result.get('success', False)
         
         if monetary_ok or company_ok or supplier_ok:
-            # Calculate combined score
             scores = []
             weights = []
             
@@ -290,10 +282,8 @@ if analyze_btn and ticker:
                 overall_signal = "BUY"
             elif combined_score >= 5.5:
                 overall_signal = "HOLD (Lean Buy)"
-            elif combined_score >= 4.5:
-                overall_signal = "HOLD"
             else:
-                overall_signal = "SELL"
+                overall_signal = "HOLD/SELL"
             
             st.markdown("### 🎯 Overall Assessment")
             
@@ -306,26 +296,7 @@ if analyze_btn and ticker:
                 modules_active = sum([monetary_ok, company_ok, supplier_ok])
                 st.metric("Modules Active", f"{modules_active}/3")
             
-            # Gauge chart
-            try:
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=combined_score,
-                    title={'text': f"{ticker} Overall Score"},
-                    gauge={
-                        'axis': {'range': [0, 10]},
-                        'bar': {'color': "darkblue"},
-                        'steps': [
-                            {'range': [0, 3], 'color': "#ffcccc"},
-                            {'range': [3, 7], 'color': "#ffffcc"},
-                            {'range': [7, 10], 'color': "#ccffcc"}
-                        ]
-                    }
-                ))
-                st.plotly_chart(fig, use_container_width=True)
-            except:
-                pass
-            
+            # Module breakdown
             st.markdown("---")
             st.markdown("### 📊 Module Breakdown")
             
@@ -338,31 +309,25 @@ if analyze_btn and ticker:
                 if monetary_ok:
                     score = monetary_result['score']
                     color = "🟢" if score >= 7.5 else "🟡" if score >= 6.5 else "🔴"
-                    st.markdown(f"#### {color} Monetary Factors")
+                    st.markdown(f"#### {color} Monetary")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"**Signal:** {monetary_result['signal']}")
-                else:
-                    st.markdown("#### ⚪ Monetary Factors")
-                    st.error("Failed")
+                    st.caption(monetary_result['signal'])
             
             with col2:
                 if company_ok:
                     score = company_result['score']
                     color = "🟢" if score >= 7.5 else "🟡" if score >= 6.5 else "🔴"
-                    st.markdown(f"#### {color} Company Performance")
+                    st.markdown(f"#### {color} Company")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"**Signal:** {company_result['signal']}")
-                else:
-                    st.markdown("#### ⚪ Company Performance")
-                    st.error("Failed")
+                    st.caption(company_result['signal'])
             
             if supplier_ok:
                 with col3:
                     score = supplier_result['score']
                     color = "🟢" if score >= 7.0 else "🟡" if score >= 5.5 else "🔴"
-                    st.markdown(f"#### {color} Supplier Analysis")
+                    st.markdown(f"#### {color} Suppliers")
                     st.metric("Risk Score", f"{score}/10")
-                    st.caption(f"**Risk Level:** {supplier_result['signal']}")
+                    st.caption(supplier_result['signal'])
         else:
             st.error("All modules failed")
     
@@ -401,156 +366,177 @@ if analyze_btn and ticker:
                 if monetary_result.get('yld'):
                     st.info(f"10Y: {monetary_result['yld']['current']:.2f}%")
         else:
-            st.error(f"Error: {monetary_result.get('error', 'Unknown error')}")
+            st.error(f"Error: {monetary_result.get('error')}")
     
     # TAB 3: Company
     with tab3:
-        st.markdown(f"## 📄 Company Performance Analysis: {ticker}")
+        st.markdown(f"## 📄 Company Performance: {ticker}")
         
         if company_result.get('success'):
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Company Score", f"{company_result['score']}/10")
+                st.metric("Score", f"{company_result['score']}/10")
             with col2:
                 st.metric("Signal", company_result['signal'])
             
             if company_result.get('data_date'):
-                st.caption(f"📅 Data from: {company_result['data_date']}")
-            
-            st.markdown("### Performance Factors")
+                st.caption(f"📅 Data: {company_result['data_date']}")
             
             factors = company_result.get('factors', {})
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.markdown("#### 📊 Revenue Growth")
-                rev_factor = factors.get('revenue_growth', {})
-                st.metric("Score", f"{rev_factor.get('score', 0):+.1f}/2.0")
-                st.caption(rev_factor.get('reasoning', 'N/A'))
-                
-                st.markdown("#### 💰 Profitability")
-                prof_factor = factors.get('profitability', {})
-                st.metric("Score", f"{prof_factor.get('score', 0):+.1f}/2.0")
-                st.caption(prof_factor.get('reasoning', 'N/A'))
+                st.markdown("#### 📊 Revenue")
+                rev = factors.get('revenue_growth', {})
+                st.metric("Score", f"{rev.get('score', 0):+.1f}/2.0")
+                st.caption(rev.get('reasoning', 'N/A'))
             
             with col2:
                 st.markdown("#### 📈 Margins")
-                margin_factor = factors.get('margins', {})
-                st.metric("Score", f"{margin_factor.get('score', 0):+.1f}/2.0")
-                st.caption(margin_factor.get('reasoning', 'N/A'))
-                
-                st.markdown("#### 🏥 Financial Health")
-                health_factor = factors.get('financial_health', {})
-                st.metric("Score", f"{health_factor.get('score', 0):+.1f}/2.0")
-                st.caption(health_factor.get('reasoning', 'N/A'))
+                margin = factors.get('margins', {})
+                st.metric("Score", f"{margin.get('score', 0):+.1f}/2.0")
+                st.caption(margin.get('reasoning', 'N/A'))
             
             with col3:
-                st.markdown("#### 🎯 Guidance")
-                guidance_factor = factors.get('guidance', {})
-                st.metric("Score", f"{guidance_factor.get('score', 0):+.1f}/2.0")
-                st.caption(guidance_factor.get('reasoning', 'N/A'))
+                st.markdown("#### 🏥 Health")
+                health = factors.get('financial_health', {})
+                st.metric("Score", f"{health.get('score', 0):+.1f}/2.0")
+                st.caption(health.get('reasoning', 'N/A'))
         else:
-            st.error(f"Error: {company_result.get('error', 'Unknown error')}")
+            st.error(f"Error: {company_result.get('error')}")
     
-    # TAB 4: Suppliers
+    # TAB 4: Enhanced Supplier Analysis
     with tab4:
-        st.markdown(f"## 🏭 Supplier Analysis: {ticker}")
+        st.markdown(f"## 🏭 Enhanced Supplier Analysis: {ticker}")
         
         if not anthropic_api_key:
-            st.warning("⚠️ Anthropic API key required for supplier analysis")
+            st.warning("⚠️ Anthropic API key required")
             st.info("Add your API key in the sidebar")
         elif supplier_result.get('success'):
-            col1, col2, col3 = st.columns(3)
+            # Header metrics
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Supplier Risk Score", f"{supplier_result['score']}/10")
+                st.metric("Risk Score", f"{supplier_result['score']}/10")
             with col2:
                 st.metric("Risk Level", supplier_result['signal'])
             with col3:
-                st.metric("Suppliers Analyzed", len(supplier_result.get('suppliers', [])))
+                st.metric("Suppliers", len(supplier_result.get('suppliers', [])))
+            with col4:
+                st.metric("API Cost", f"${supplier_result.get('estimated_cost', 0):.3f}")
             
-            st.caption(f"📅 Based on 10-K filed: {supplier_result.get('filing_date', 'N/A')}")
-            st.caption(f"💰 API Cost: ${supplier_result.get('estimated_cost', 0):.3f}")
+            st.caption(f"🔍 Search Quality: {supplier_result.get('search_quality', 'Unknown')}")
+            st.caption(f"💰 Tokens Used: {supplier_result.get('tokens_used', 0):,}")
             
+            # Overall assessment
+            st.markdown("---")
             st.markdown("### 🎯 Overall Assessment")
-            st.info(f"**Overall Supplier Risk:** {supplier_result.get('overall_supplier_risk', 'Medium')}")
+            st.info(f"**Overall Risk:** {supplier_result.get('overall_supplier_risk', 'Unknown')}")
             
             if supplier_result.get('key_findings'):
                 st.markdown("**Key Findings:**")
                 for finding in supplier_result['key_findings']:
                     st.markdown(f"• {finding}")
             
+            # Detailed supplier analysis
             st.markdown("---")
-            st.markdown("### 📋 Supplier Details")
+            st.markdown("### 📋 Detailed Supplier Analysis")
             
             suppliers = supplier_result.get('suppliers', [])
             
             for i, supplier in enumerate(suppliers):
-                with st.expander(f"**{i+1}. {supplier['name']}** - Score: {supplier['score']:+.1f}/2.0", expanded=(i==0)):
+                with st.expander(
+                    f"**{i+1}. {supplier['name']}** ({supplier.get('ticker', 'PRIVATE')}) - Score: {supplier.get('score', 0):+.1f}/2.0",
+                    expanded=(i==0)
+                ):
+                    # Basic Info
                     col1, col2 = st.columns([2, 1])
                     
                     with col1:
                         st.markdown(f"**Supplies:** {supplier.get('supplies', 'N/A')}")
                         st.markdown(f"**Importance:** {supplier.get('importance', 'N/A')}")
-                        st.markdown(f"**Revenue Exposure:** {supplier.get('revenue_exposure', 'Not disclosed')}")
-                        
-                        if supplier.get('relationship_notes'):
-                            st.markdown(f"**Relationship:** {supplier['relationship_notes']}")
+                        st.markdown(f"**Financial Exposure:** {supplier.get('financial_exposure', 'Not disclosed')}")
+                        if supplier.get('recent_context'):
+                            st.markdown(f"**Recent:** {supplier['recent_context']}")
                     
                     with col2:
-                        ticker_display = supplier.get('ticker', 'PRIVATE')
-                        if ticker_display != 'PRIVATE':
-                            st.metric("Ticker", ticker_display)
+                        if supplier.get('ticker') != 'PRIVATE':
+                            st.metric("Ticker", supplier['ticker'])
                         else:
                             st.caption("🔒 Private Company")
                     
-                    if supplier.get('risks'):
-                        st.markdown("**Identified Risks:**")
-                        for risk in supplier['risks']:
-                            st.markdown(f"⚠️ {risk}")
-                    
+                    # Financial Metrics
                     if supplier.get('financials'):
                         st.markdown("---")
-                        st.markdown("**Financial Metrics:**")
-                        fin = supplier['financials']
+                        st.markdown("**📊 Financial Metrics**")
                         
-                        col1, col2, col3 = st.columns(3)
+                        fin = supplier['financials']
+                        col1, col2, col3, col4 = st.columns(4)
+                        
                         with col1:
                             if fin.get('market_cap'):
-                                mc = fin['market_cap'] / 1e9
-                                st.metric("Market Cap", f"${mc:.1f}B")
+                                st.metric("Market Cap", f"${fin['market_cap']/1e9:.1f}B")
                         with col2:
-                            if fin.get('profit_margin'):
-                                st.metric("Profit Margin", f"{fin['profit_margin']*100:.1f}%")
+                            if fin.get('revenue'):
+                                st.metric("Revenue (Q)", f"${fin['revenue']/1e9:.1f}B")
                         with col3:
-                            if fin.get('debt_to_equity'):
-                                st.metric("Debt/Equity", f"{fin['debt_to_equity']:.2f}")
+                            if fin.get('profit_margin'):
+                                st.metric("Margin", f"{fin['profit_margin']*100:.1f}%")
+                        with col4:
+                            if fin.get('revenue_growth'):
+                                st.metric("Growth", f"{fin['revenue_growth']:+.1f}%")
                     
-                    if supplier.get('mda_analysis') and supplier['mda_analysis'].get('success'):
-                        mda = supplier['mda_analysis']
+                    # Impact Analysis
+                    if supplier.get('impact_analysis') and supplier['impact_analysis'].get('success'):
+                        impact = supplier['impact_analysis']
                         
                         st.markdown("---")
-                        st.markdown("**MD&A Analysis (AI-Generated):**")
+                        st.markdown("**🎯 Impact Analysis**")
                         
+                        # Quantitative
+                        if impact.get('quantitative'):
+                            st.markdown("**📊 Quantitative Impact:**")
+                            quant = impact['quantitative']
+                            st.markdown(f"• **Financial Scale:** {quant.get('financial_scale', 'N/A')}")
+                            st.markdown(f"• **Capacity:** {quant.get('capacity_assessment', 'N/A')}")
+                            st.markdown(f"• **Investment:** {quant.get('investment_outlook', 'N/A')}")
+                            st.markdown(f"• **Dependency:** {quant.get('mutual_dependency', 'N/A')}")
+                        
+                        # Qualitative
+                        if impact.get('qualitative'):
+                            st.markdown("**💭 Qualitative Impact:**")
+                            qual = impact['qualitative']
+                            st.markdown(f"• **Strategic Importance:** {qual.get('strategic_importance', 'N/A')}")
+                            st.markdown(f"• **Relationship:** {qual.get('relationship_strength', 'N/A')}")
+                            st.markdown(f"• **Risk Level:** {qual.get('risk_level', 'N/A')}")
+                            st.markdown(f"• **Alternatives:** {qual.get('alternative_availability', 'N/A')}")
+                        
+                        # Opportunities, Challenges, Risks
                         col1, col2, col3 = st.columns(3)
+                        
                         with col1:
-                            health = mda.get('financial_health', 'Unknown')
-                            health_color = "🟢" if health == "Healthy" else "🟡" if health == "Concerning" else "🔴"
-                            st.markdown(f"**Health:** {health_color} {health}")
+                            if impact.get('opportunities'):
+                                st.success("**✅ Opportunities**")
+                                for opp in impact['opportunities']:
+                                    st.markdown(f"• {opp}")
+                        
                         with col2:
-                            outlook = mda.get('forward_outlook', 'Unknown')
-                            outlook_color = "🟢" if outlook == "Positive" else "🟡" if outlook == "Neutral" else "🔴"
-                            st.markdown(f"**Outlook:** {outlook_color} {outlook}")
+                            if impact.get('challenges'):
+                                st.warning("**⚠️ Challenges**")
+                                for ch in impact['challenges']:
+                                    st.markdown(f"• {ch}")
+                        
                         with col3:
-                            reliability = mda.get('reliability_score', 0)
-                            st.metric("Reliability", f"{reliability}/10")
+                            if impact.get('risks'):
+                                st.error("**🚨 Risks**")
+                                for risk in impact['risks']:
+                                    st.markdown(f"• {risk}")
                         
-                        if mda.get('summary'):
-                            st.markdown(f"**Summary:** {mda['summary']}")
+                        # Summary and Reliability
+                        if impact.get('summary'):
+                            st.info(f"**Summary:** {impact['summary']}")
                         
-                        if mda.get('red_flags'):
-                            st.warning("**🚨 Red Flags:**")
-                            for flag in mda['red_flags']:
-                                st.markdown(f"• {flag}")
+                        if impact.get('reliability_score'):
+                            st.metric("Reliability Score", f"{impact['reliability_score']}/10")
         else:
             st.error(f"❌ Error: {supplier_result.get('error', 'Unknown error')}")
 
@@ -559,7 +545,6 @@ st.markdown("---")
 st.markdown("""
 <div style="background-color: #fff3cd; padding: 1rem; border-radius: 0.5rem;">
     <strong>⚠️ DISCLAIMER</strong><br>
-    For educational purposes only. NOT investment advice. 
-    Consult a qualified financial advisor before making investment decisions.
+    For educational purposes only. NOT investment advice.
 </div>
 """, unsafe_allow_html=True)
