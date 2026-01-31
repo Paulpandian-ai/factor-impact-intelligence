@@ -1,6 +1,6 @@
 """
 Factor Impact Intelligence - Complete Platform
-FINAL VERSION with enhanced Macro tab that handles all edge cases
+WITH ANALYST CRITIQUE MODULE (Module 8)
 """
 
 import streamlit as st
@@ -18,6 +18,7 @@ from company_analyzer import CompanyPerformanceAnalyzer
 from supplier_analyzer import SupplierAnalyzer
 from customer_analyzer import CustomerAnalyzer
 from macro_analyzer import MacroFactorAnalyzer
+from analyst_critique import AnalystCritique  # NEW MODULE
 
 st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
 
@@ -45,12 +46,13 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("""
-    ### 📊 Active Modules (5)
+    ### 📊 Active Modules (6)
     - ✅ Module 0: Monetary
     - ✅ Module 1: Company
     - ✅ Module 2: Suppliers
     - ✅ Module 3: Customers
     - ✅ Module 5: Macro
+    - ✅ Module 8: Analyst Critique 🆕
     """)
 
 
@@ -215,10 +217,10 @@ with col2:
     analyze_btn = st.button("📊 Analyze All Modules", type="primary")
 
 if analyze_btn and ticker:
-    # Create tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Create tabs - NOW WITH 7 TABS INCLUDING ANALYST CRITIQUE
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Summary", "💰 Monetary", "📄 Company", 
-        "🏭 Suppliers", "👥 Customers", "🌍 Macro"
+        "🏭 Suppliers", "👥 Customers", "🌍 Macro", "🎯 Analyst Critique"
     ])
     
     with st.spinner(f"Analyzing {ticker} (90-120 seconds)..."):
@@ -262,6 +264,16 @@ if analyze_btn and ticker:
         except Exception as e:
             macro_result = {'success': False, 'error': str(e)}
     
+    # Store results in session state for analyst critique
+    st.session_state['analysis_results'] = {
+        'ticker': ticker,
+        'monetary': monetary_result,
+        'company': company_result,
+        'suppliers': supplier_result,
+        'customers': customer_result,
+        'macro': macro_result
+    }
+    
     # TAB 1: Summary
     with tab1:
         st.markdown(f"## {ticker} - Complete Analysis")
@@ -304,6 +316,10 @@ if analyze_btn and ticker:
                 overall_signal = "HOLD"
             else:
                 overall_signal = "SELL"
+            
+            # Store combined score for analyst critique
+            st.session_state['analysis_results']['combined_score'] = combined_score
+            st.session_state['analysis_results']['combined_signal'] = overall_signal
             
             st.markdown("### 🎯 Overall Assessment")
             
@@ -503,7 +519,7 @@ if analyze_btn and ticker:
         else:
             st.error(f"Error: {customer_result.get('error')}")
     
-    # TAB 6: Macro Factors (FULLY ENHANCED)
+    # TAB 6: Macro Factors
     with tab6:
         st.markdown(f"## 🌍 Macro Factors: {ticker}")
         
@@ -525,7 +541,7 @@ if analyze_btn and ticker:
             st.caption("Weights: 🌍 Geopolitical 30% | ⚖️ Regulatory 25% | 📈 Industry 25% | 🛢️ Commodity 15% | 🌱 ESG 5%")
             st.markdown("")
             
-            # Get categories - MORE DEFENSIVE
+            # Get categories
             geo = macro_result.get('geopolitical') or {}
             reg = macro_result.get('regulatory') or {}
             ind = macro_result.get('industry') or {}
@@ -666,6 +682,159 @@ if analyze_btn and ticker:
             
         else:
             st.error(f"❌ Error: {macro_result.get('error', 'Unknown error')}")
+    
+    # TAB 7: ANALYST CRITIQUE (NEW!)
+    with tab7:
+        st.markdown(f"## 🎯 Analyst Critique: {ticker}")
+        st.markdown("Upload an analyst report (PDF) to compare with our comprehensive analysis")
+        
+        if not anthropic_api_key:
+            st.warning("⚠️ Anthropic API key required for analyst critique")
+        else:
+            # File uploader
+            uploaded_file = st.file_uploader(
+                "Upload Analyst Report (PDF)",
+                type=['pdf'],
+                help="Upload Morningstar, Goldman Sachs, or any analyst report"
+            )
+            
+            if uploaded_file is not None:
+                st.success(f"✅ Uploaded: {uploaded_file.name}")
+                
+                # Critique button
+                if st.button("🔍 Critique This Report", type="primary"):
+                    with st.spinner("Analyzing analyst report and generating critique..."):
+                        try:
+                            # Read PDF
+                            pdf_data = uploaded_file.read()
+                            
+                            # Initialize critique engine
+                            critique_engine = AnalystCritique(anthropic_api_key=anthropic_api_key)
+                            
+                            # Get platform data
+                            platform_data = st.session_state.get('analysis_results', {})
+                            
+                            # Generate critique
+                            result = critique_engine.generate_critique(
+                                pdf_data=pdf_data,
+                                filename=uploaded_file.name,
+                                platform_data=platform_data
+                            )
+                            
+                            if result.get('success'):
+                                analyst_thesis = result['analyst_thesis']
+                                critique = result['critique']
+                                
+                                # Display analyst's view
+                                st.markdown("---")
+                                st.markdown("### 📄 Analyst's View")
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Firm", analyst_thesis.get('analyst_firm', 'Unknown'))
+                                with col2:
+                                    st.metric("Rating", analyst_thesis.get('rating', 'N/A'))
+                                with col3:
+                                    fv = analyst_thesis.get('fair_value')
+                                    st.metric("Fair Value", f"${fv}" if fv else "N/A")
+                                with col4:
+                                    st.metric("Moat", analyst_thesis.get('economic_moat', 'N/A'))
+                                
+                                if analyst_thesis.get('key_thesis'):
+                                    st.markdown("**Key Investment Thesis:**")
+                                    for thesis in analyst_thesis['key_thesis']:
+                                        st.markdown(f"• {thesis}")
+                                
+                                # Display critique
+                                st.markdown("---")
+                                st.markdown("### ✅ What They Got Right")
+                                
+                                for agree in critique.get('agreement_areas', []):
+                                    with st.expander(f"✅ {agree.get('topic', 'Agreement')}"):
+                                        st.markdown(f"**Analyst's View:** {agree.get('analyst_view', 'N/A')}")
+                                        st.markdown(f"**Our Data:** {agree.get('our_data', 'N/A')}")
+                                        st.success(agree.get('verdict', 'AGREE'))
+                                
+                                st.markdown("---")
+                                st.markdown("### ⚠️ What They Missed")
+                                
+                                for missed in critique.get('missed_factors', []):
+                                    severity = missed.get('severity', 'Medium')
+                                    icon = "🔴" if severity == "High" else "🟡" if severity == "Medium" else "🟢"
+                                    
+                                    with st.expander(f"{icon} {missed.get('factor', 'Missed Factor')}"):
+                                        st.markdown(f"**Why Important:** {missed.get('why_important', 'N/A')}")
+                                        st.markdown(f"**Impact:** {missed.get('impact', 'N/A')}")
+                                        st.warning(f"Severity: {severity}")
+                                
+                                if critique.get('underweighted_risks'):
+                                    st.markdown("---")
+                                    st.markdown("### 🔽 Underweighted Risks")
+                                    
+                                    for risk in critique['underweighted_risks']:
+                                        with st.expander(f"⚠️ {risk.get('risk', 'Risk')}"):
+                                            st.markdown(f"**Analyst Treatment:** {risk.get('analyst_treatment', 'N/A')}")
+                                            st.markdown(f"**Our Assessment:** {risk.get('our_assessment', 'N/A')}")
+                                            st.error(f"**Gap:** {risk.get('gap', 'N/A')}")
+                                
+                                # Adjusted view
+                                st.markdown("---")
+                                st.markdown("### 🎯 Our Adjusted View")
+                                
+                                adjusted = critique.get('our_adjusted_view', {})
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("Our Price Target", adjusted.get('price_target', 'N/A'))
+                                with col2:
+                                    st.metric("Our Rating", adjusted.get('rating', 'N/A'))
+                                
+                                if adjusted.get('key_differences'):
+                                    st.markdown("**Key Differences:**")
+                                    for diff in adjusted['key_differences']:
+                                        st.markdown(f"• {diff}")
+                                
+                                if adjusted.get('reasoning'):
+                                    st.info(adjusted['reasoning'])
+                                
+                                # Summary
+                                st.markdown("---")
+                                st.markdown("### 📝 Critique Summary")
+                                st.markdown(critique.get('critique_summary', 'No summary available'))
+                                
+                                # Cost
+                                st.markdown("---")
+                                st.caption(f"💰 Analysis Cost: ${result.get('estimated_cost', 0):.3f}")
+                                
+                            else:
+                                st.error(f"❌ Error: {result.get('error', 'Unknown error')}")
+                        
+                        except Exception as e:
+                            st.error(f"❌ Error processing report: {str(e)}")
+            
+            else:
+                st.info("👆 Upload an analyst report to begin critique")
+                
+                # Show sample output
+                with st.expander("📊 See Example Output"):
+                    st.markdown("""
+**Example: Morningstar NVDA Report Critique**
+
+✅ **What They Got Right:**
+- Strong AI demand fundamentals
+- Wide economic moat
+- High profitability metrics
+
+⚠️ **What They Missed:**
+- 🔴 Supply chain concentration (90% TSMC)
+- 🔴 Geopolitical risk underweighted
+- 🟡 Customer concentration not analyzed
+
+🎯 **Adjusted View:**
+- Analyst Fair Value: $240
+- Our Target: $165-170
+- Reason: Underweights geopolitical (-$10) and supply chain risk (-$10)
+""")
 
 # Disclaimer
 st.markdown("---")
