@@ -1,6 +1,7 @@
 """
 Factor Impact Intelligence - Complete Platform
-WITH ANALYST CRITIQUE MODULE (Module 8)
+WITH ANALYST CRITIQUE MODULE (Module 8) - FIXED VERSION
+Handles file upload without losing analysis state
 """
 
 import streamlit as st
@@ -18,9 +19,15 @@ from company_analyzer import CompanyPerformanceAnalyzer
 from supplier_analyzer import SupplierAnalyzer
 from customer_analyzer import CustomerAnalyzer
 from macro_analyzer import MacroFactorAnalyzer
-from analyst_critique import AnalystCritique  # NEW MODULE
+from analyst_critique import AnalystCritique
 
 st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
+
+# Initialize session state
+if 'analysis_complete' not in st.session_state:
+    st.session_state.analysis_complete = False
+if 'analysis_results' not in st.session_state:
+    st.session_state.analysis_results = {}
 
 # Header
 st.markdown("# 💰 Factor Impact Intelligence")
@@ -216,13 +223,8 @@ with col2:
     st.write("")
     analyze_btn = st.button("📊 Analyze All Modules", type="primary")
 
+# Run analysis if button clicked
 if analyze_btn and ticker:
-    # Create tabs - NOW WITH 7 TABS INCLUDING ANALYST CRITIQUE
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Summary", "💰 Monetary", "📄 Company", 
-        "🏭 Suppliers", "👥 Customers", "🌍 Macro", "🎯 Analyst Critique"
-    ])
-    
     with st.spinner(f"Analyzing {ticker} (90-120 seconds)..."):
         # Run all analyses
         monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
@@ -264,8 +266,8 @@ if analyze_btn and ticker:
         except Exception as e:
             macro_result = {'success': False, 'error': str(e)}
     
-    # Store results in session state for analyst critique
-    st.session_state['analysis_results'] = {
+    # Store results in session state
+    st.session_state.analysis_results = {
         'ticker': ticker,
         'monetary': monetary_result,
         'company': company_result,
@@ -273,6 +275,24 @@ if analyze_btn and ticker:
         'customers': customer_result,
         'macro': macro_result
     }
+    st.session_state.analysis_complete = True
+
+# Show tabs if analysis is complete
+if st.session_state.analysis_complete:
+    # Get results from session state
+    results = st.session_state.analysis_results
+    ticker = results['ticker']
+    monetary_result = results['monetary']
+    company_result = results['company']
+    supplier_result = results['suppliers']
+    customer_result = results['customers']
+    macro_result = results['macro']
+    
+    # Create tabs
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📊 Summary", "💰 Monetary", "📄 Company", 
+        "🏭 Suppliers", "👥 Customers", "🌍 Macro", "🎯 Analyst Critique"
+    ])
     
     # TAB 1: Summary
     with tab1:
@@ -317,9 +337,9 @@ if analyze_btn and ticker:
             else:
                 overall_signal = "SELL"
             
-            # Store combined score for analyst critique
-            st.session_state['analysis_results']['combined_score'] = combined_score
-            st.session_state['analysis_results']['combined_signal'] = overall_signal
+            # Store combined score
+            st.session_state.analysis_results['combined_score'] = combined_score
+            st.session_state.analysis_results['combined_signal'] = overall_signal
             
             st.markdown("### 🎯 Overall Assessment")
             
@@ -526,7 +546,6 @@ if analyze_btn and ticker:
         if not anthropic_api_key:
             st.warning("⚠️ Anthropic API key required")
         elif macro_result.get('success'):
-            # Header
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Macro Score", f"{macro_result['score']}/10")
@@ -541,29 +560,24 @@ if analyze_btn and ticker:
             st.caption("Weights: 🌍 Geopolitical 30% | ⚖️ Regulatory 25% | 📈 Industry 25% | 🛢️ Commodity 15% | 🌱 ESG 5%")
             st.markdown("")
             
-            # Get categories
             geo = macro_result.get('geopolitical') or {}
             reg = macro_result.get('regulatory') or {}
             ind = macro_result.get('industry') or {}
             com = macro_result.get('commodity') or {}
             esg = macro_result.get('esg') or {}
             
-            # 1. GEOPOLITICAL
             with st.expander("🌍 **Geopolitical Risk** (30% weight)", expanded=True):
                 if geo and (geo.get('success') or geo.get('overall_score') is not None):
                     score = geo.get('overall_score', 0)
-                    
                     if score >= 0:
                         st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
                     elif score >= -1:
                         st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
                     else:
                         st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
-                    
                     if geo.get('summary'):
                         st.markdown("**Summary:**")
                         st.info(geo['summary'])
-                    
                     if geo.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in geo['key_risks']:
@@ -571,22 +585,18 @@ if analyze_btn and ticker:
                 else:
                     st.error("Geopolitical analysis not available")
             
-            # 2. REGULATORY
             with st.expander("⚖️ **Regulatory Risk** (25% weight)"):
                 if reg and (reg.get('success') or reg.get('overall_score') is not None):
                     score = reg.get('overall_score', 0)
-                    
                     if score >= 0:
                         st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
                     elif score >= -1:
                         st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
                     else:
                         st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
-                    
                     if reg.get('summary'):
                         st.markdown("**Summary:**")
                         st.info(reg['summary'])
-                    
                     if reg.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in reg['key_risks']:
@@ -594,22 +604,18 @@ if analyze_btn and ticker:
                 else:
                     st.error("Regulatory analysis not available")
             
-            # 3. INDUSTRY
             with st.expander("📈 **Industry Dynamics** (25% weight)"):
                 if ind and (ind.get('success') or ind.get('overall_score') is not None):
                     score = ind.get('overall_score', 0)
-                    
                     if score >= 1:
                         st.success(f"**Score: {score:+.1f}/2.0** (Strong)")
                     elif score >= 0:
                         st.info(f"**Score: {score:+.1f}/2.0** (Neutral)")
                     else:
                         st.warning(f"**Score: {score:+.1f}/2.0** (Weak)")
-                    
                     if ind.get('summary'):
                         st.markdown("**Summary:**")
                         st.info(ind['summary'])
-                    
                     if ind.get('key_trends'):
                         st.markdown("**Key Trends:**")
                         for trend in ind['key_trends']:
@@ -617,22 +623,18 @@ if analyze_btn and ticker:
                 else:
                     st.error("Industry analysis not available")
             
-            # 4. COMMODITY
             with st.expander("🛢️ **Commodity & Input Risk** (15% weight)"):
                 if com and (com.get('success') or com.get('overall_score') is not None):
                     score = com.get('overall_score', 0)
-                    
                     if score >= 0:
                         st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
                     elif score >= -1:
                         st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
                     else:
                         st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
-                    
                     if com.get('summary'):
                         st.markdown("**Summary:**")
                         st.info(com['summary'])
-                    
                     if com.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in com['key_risks']:
@@ -640,22 +642,18 @@ if analyze_btn and ticker:
                 else:
                     st.error("Commodity analysis not available")
             
-            # 5. ESG
             with st.expander("🌱 **ESG Factors** (5% weight)"):
                 if esg and (esg.get('success') or esg.get('overall_score') is not None):
                     score = esg.get('overall_score', 0)
-                    
                     if score >= 0:
                         st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
                     elif score >= -1:
                         st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
                     else:
                         st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
-                    
                     if esg.get('summary'):
                         st.markdown("**Summary:**")
                         st.info(esg['summary'])
-                    
                     if esg.get('key_issues'):
                         st.markdown("**Key Issues:**")
                         for issue in esg['key_issues']:
@@ -663,11 +661,8 @@ if analyze_btn and ticker:
                 else:
                     st.error("ESG analysis not available")
             
-            # Overall calculation
             st.markdown("---")
             st.markdown("### 💡 Overall Macro Assessment")
-            
-            weights = macro_result.get('weights', {})
             
             st.markdown(f"""
 **Weighted Calculation:**
@@ -683,7 +678,7 @@ if analyze_btn and ticker:
         else:
             st.error(f"❌ Error: {macro_result.get('error', 'Unknown error')}")
     
-    # TAB 7: ANALYST CRITIQUE (NEW!)
+    # TAB 7: ANALYST CRITIQUE
     with tab7:
         st.markdown(f"## 🎯 Analyst Critique: {ticker}")
         st.markdown("Upload an analyst report (PDF) to compare with our comprehensive analysis")
@@ -691,30 +686,23 @@ if analyze_btn and ticker:
         if not anthropic_api_key:
             st.warning("⚠️ Anthropic API key required for analyst critique")
         else:
-            # File uploader
             uploaded_file = st.file_uploader(
                 "Upload Analyst Report (PDF)",
                 type=['pdf'],
-                help="Upload Morningstar, Goldman Sachs, or any analyst report"
+                help="Upload Morningstar, Goldman Sachs, or any analyst report",
+                key="analyst_pdf"
             )
             
             if uploaded_file is not None:
                 st.success(f"✅ Uploaded: {uploaded_file.name}")
                 
-                # Critique button
-                if st.button("🔍 Critique This Report", type="primary"):
+                if st.button("🔍 Critique This Report", type="primary", key="critique_btn"):
                     with st.spinner("Analyzing analyst report and generating critique..."):
                         try:
-                            # Read PDF
                             pdf_data = uploaded_file.read()
-                            
-                            # Initialize critique engine
                             critique_engine = AnalystCritique(anthropic_api_key=anthropic_api_key)
+                            platform_data = st.session_state.analysis_results
                             
-                            # Get platform data
-                            platform_data = st.session_state.get('analysis_results', {})
-                            
-                            # Generate critique
                             result = critique_engine.generate_critique(
                                 pdf_data=pdf_data,
                                 filename=uploaded_file.name,
@@ -725,7 +713,6 @@ if analyze_btn and ticker:
                                 analyst_thesis = result['analyst_thesis']
                                 critique = result['critique']
                                 
-                                # Display analyst's view
                                 st.markdown("---")
                                 st.markdown("### 📄 Analyst's View")
                                 
@@ -745,7 +732,6 @@ if analyze_btn and ticker:
                                     for thesis in analyst_thesis['key_thesis']:
                                         st.markdown(f"• {thesis}")
                                 
-                                # Display critique
                                 st.markdown("---")
                                 st.markdown("### ✅ What They Got Right")
                                 
@@ -777,7 +763,6 @@ if analyze_btn and ticker:
                                             st.markdown(f"**Our Assessment:** {risk.get('our_assessment', 'N/A')}")
                                             st.error(f"**Gap:** {risk.get('gap', 'N/A')}")
                                 
-                                # Adjusted view
                                 st.markdown("---")
                                 st.markdown("### 🎯 Our Adjusted View")
                                 
@@ -797,12 +782,10 @@ if analyze_btn and ticker:
                                 if adjusted.get('reasoning'):
                                     st.info(adjusted['reasoning'])
                                 
-                                # Summary
                                 st.markdown("---")
                                 st.markdown("### 📝 Critique Summary")
                                 st.markdown(critique.get('critique_summary', 'No summary available'))
                                 
-                                # Cost
                                 st.markdown("---")
                                 st.caption(f"💰 Analysis Cost: ${result.get('estimated_cost', 0):.3f}")
                                 
@@ -815,7 +798,6 @@ if analyze_btn and ticker:
             else:
                 st.info("👆 Upload an analyst report to begin critique")
                 
-                # Show sample output
                 with st.expander("📊 See Example Output"):
                     st.markdown("""
 **Example: Morningstar NVDA Report Critique**
