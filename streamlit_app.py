@@ -1,6 +1,6 @@
 """
 Factor Impact Intelligence - Complete Platform
-Modules: Monetary + Company + Suppliers + Customers + Macro Factors
+All 5 modules fully implemented with complete UI
 """
 
 import streamlit as st
@@ -29,7 +29,6 @@ st.markdown("### Complete Multi-Factor Stock Analysis Platform")
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # FRED API Key
     if 'fred_api_key' in st.secrets:
         fred_api_key = st.secrets['fred_api_key']
         st.success("✅ FRED API loaded")
@@ -38,7 +37,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Anthropic API Key
     if 'ANTHROPIC_API_KEY' in st.secrets:
         anthropic_api_key = st.secrets['ANTHROPIC_API_KEY']
         st.success("✅ Anthropic API loaded")
@@ -48,14 +46,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""
     ### 📊 Active Modules (5)
-    - ✅ Module 0: Monetary Factors
-    - ✅ Module 1: Company Performance
-    - ✅ Module 2: Supplier Analysis
-    - ✅ Module 3: Customer Analysis
-    - ✅ Module 5: Macro Factors
-    
-    ### 🔜 Coming Soon
-    - Module 8: Analyst Critique
+    - ✅ Module 0: Monetary
+    - ✅ Module 1: Company
+    - ✅ Module 2: Suppliers
+    - ✅ Module 3: Customers
+    - ✅ Module 5: Macro
     """)
 
 
@@ -194,9 +189,9 @@ class MonetaryFactorAnalyzer:
         elif composite >= 6.5:
             signal = "BUY"
         elif composite >= 5.5:
-            signal = "HOLD (Lean Buy)"
+            signal = "HOLD"
         else:
-            signal = "HOLD/SELL"
+            signal = "SELL"
         
         return {
             'success': True, 'ticker': ticker.upper(), 'score': composite,
@@ -226,48 +221,44 @@ if analyze_btn and ticker:
         "🏭 Suppliers", "👥 Customers", "🌍 Macro"
     ])
     
-    with st.spinner(f"Analyzing {ticker} across all modules (90-120 seconds)..."):
-        # Monetary Analysis
+    with st.spinner(f"Analyzing {ticker} (90-120 seconds)..."):
+        # Run all analyses
         monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
         try:
             monetary_result = monetary_analyzer.analyze(ticker)
         except Exception as e:
             monetary_result = {'success': False, 'error': str(e)}
         
-        # Company Analysis
         company_analyzer = CompanyPerformanceAnalyzer()
         try:
             company_result = company_analyzer.analyze(ticker, verbose=False)
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
         
-        # Supplier Analysis
         try:
             if anthropic_api_key:
                 supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
                 supplier_result = supplier_analyzer.analyze(ticker, verbose=False)
             else:
-                supplier_result = {'success': False, 'error': 'Anthropic API key required'}
+                supplier_result = {'success': False, 'error': 'API key required'}
         except Exception as e:
             supplier_result = {'success': False, 'error': str(e)}
         
-        # Customer Analysis
         try:
             if anthropic_api_key:
                 customer_analyzer = CustomerAnalyzer(anthropic_api_key=anthropic_api_key)
                 customer_result = customer_analyzer.analyze(ticker, verbose=False)
             else:
-                customer_result = {'success': False, 'error': 'Anthropic API key required'}
+                customer_result = {'success': False, 'error': 'API key required'}
         except Exception as e:
             customer_result = {'success': False, 'error': str(e)}
         
-        # Macro Factors (NEW!)
         try:
             if anthropic_api_key:
                 macro_analyzer = MacroFactorAnalyzer(anthropic_api_key=anthropic_api_key)
                 macro_result = macro_analyzer.analyze(ticker, verbose=False)
             else:
-                macro_result = {'success': False, 'error': 'Anthropic API key required'}
+                macro_result = {'success': False, 'error': 'API key required'}
         except Exception as e:
             macro_result = {'success': False, 'error': str(e)}
     
@@ -288,19 +279,15 @@ if analyze_btn and ticker:
             if monetary_ok:
                 scores.append(monetary_result['score'])
                 weights.append(0.25)
-            
             if company_ok:
                 scores.append(company_result['score'])
                 weights.append(0.25)
-            
             if supplier_ok:
                 scores.append(supplier_result['score'])
                 weights.append(0.15)
-            
             if customer_ok:
                 scores.append(customer_result['score'])
                 weights.append(0.15)
-            
             if macro_ok:
                 scores.append(macro_result['score'])
                 weights.append(0.20)
@@ -329,7 +316,6 @@ if analyze_btn and ticker:
                 modules_active = sum([monetary_ok, company_ok, supplier_ok, customer_ok, macro_ok])
                 st.metric("Modules Active", f"{modules_active}/5")
             
-            # Module breakdown
             st.markdown("---")
             st.markdown("### 📊 Module Breakdown")
             
@@ -341,7 +327,7 @@ if analyze_btn and ticker:
                     color = "🟢" if score >= 7 else "🟡" if score >= 6 else "🔴"
                     st.markdown(f"#### {color} Monetary")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"Weight: 25%")
+                    st.caption("Weight: 25%")
             
             with col2:
                 if company_ok:
@@ -349,7 +335,7 @@ if analyze_btn and ticker:
                     color = "🟢" if score >= 7 else "🟡" if score >= 6 else "🔴"
                     st.markdown(f"#### {color} Company")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"Weight: 25%")
+                    st.caption("Weight: 25%")
             
             with col3:
                 if supplier_ok:
@@ -357,7 +343,7 @@ if analyze_btn and ticker:
                     color = "🟢" if score >= 7 else "🟡" if score >= 5.5 else "🔴"
                     st.markdown(f"#### {color} Supply")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"Weight: 15%")
+                    st.caption("Weight: 15%")
             
             with col4:
                 if customer_ok:
@@ -365,7 +351,7 @@ if analyze_btn and ticker:
                     color = "🟢" if score >= 7 else "🟡" if score >= 5.5 else "🔴"
                     st.markdown(f"#### {color} Demand")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"Weight: 15%")
+                    st.caption("Weight: 15%")
             
             with col5:
                 if macro_ok:
@@ -373,14 +359,151 @@ if analyze_btn and ticker:
                     color = "🟢" if score >= 7 else "🟡" if score >= 5.5 else "🔴"
                     st.markdown(f"#### {color} Macro")
                     st.metric("Score", f"{score}/10")
-                    st.caption(f"Weight: 20%")
+                    st.caption("Weight: 20%")
         else:
             st.error("All modules failed")
     
-    # TAB 2-5: Existing tabs (Monetary, Company, Suppliers, Customers)
-    # [Previous code for these tabs remains the same - truncated for brevity]
+    # TAB 2: Monetary
+    with tab2:
+        st.markdown(f"## 💰 Monetary Analysis: {ticker}")
+        
+        if monetary_result.get('success'):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Score", f"{monetary_result['score']}/10")
+            with col2:
+                st.metric("Signal", monetary_result['signal'])
+            with col3:
+                if monetary_result.get('beta'):
+                    st.metric("Beta", f"{monetary_result['beta']:.2f}")
+            
+            st.markdown("### Factor Scores")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("#### 🏦 Fed Rate")
+                st.metric("Score", f"{monetary_result['fed_score']:+.1f}/2.0")
+                if monetary_result.get('fed'):
+                    st.info(f"Current: {monetary_result['fed']['current']:.2f}%")
+            
+            with col2:
+                st.markdown("#### 📊 Inflation")
+                st.metric("Score", f"{monetary_result['inf_score']:+.1f}/2.0")
+                if monetary_result.get('inf'):
+                    st.info(f"YoY: {monetary_result['inf']['yoy']:.2f}%")
+            
+            with col3:
+                st.markdown("#### 📈 Yields")
+                st.metric("Score", f"{monetary_result['yld_score']:+.1f}/2.0")
+                if monetary_result.get('yld'):
+                    st.info(f"10Y: {monetary_result['yld']['current']:.2f}%")
+        else:
+            st.error(f"Error: {monetary_result.get('error')}")
     
-    # TAB 6: Macro Factors (NEW!)
+    # TAB 3: Company
+    with tab3:
+        st.markdown(f"## 📄 Company Performance: {ticker}")
+        
+        if company_result.get('success'):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Score", f"{company_result['score']}/10")
+            with col2:
+                st.metric("Signal", company_result['signal'])
+            
+            if company_result.get('data_date'):
+                st.caption(f"📅 Data: {company_result['data_date']}")
+            
+            factors = company_result.get('factors', {})
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("#### 📊 Revenue")
+                rev = factors.get('revenue_growth', {})
+                st.metric("Score", f"{rev.get('score', 0):+.1f}/2.0")
+                st.caption(rev.get('reasoning', 'N/A'))
+            
+            with col2:
+                st.markdown("#### 📈 Margins")
+                margin = factors.get('margins', {})
+                st.metric("Score", f"{margin.get('score', 0):+.1f}/2.0")
+                st.caption(margin.get('reasoning', 'N/A'))
+            
+            with col3:
+                st.markdown("#### 🏥 Health")
+                health = factors.get('financial_health', {})
+                st.metric("Score", f"{health.get('score', 0):+.1f}/2.0")
+                st.caption(health.get('reasoning', 'N/A'))
+        else:
+            st.error(f"Error: {company_result.get('error')}")
+    
+    # TAB 4: Suppliers
+    with tab4:
+        st.markdown(f"## 🏭 Supplier Analysis: {ticker}")
+        
+        if not anthropic_api_key:
+            st.warning("⚠️ Anthropic API key required")
+        elif supplier_result.get('success'):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Risk Score", f"{supplier_result['score']}/10")
+            with col2:
+                st.metric("Risk Level", supplier_result['signal'])
+            with col3:
+                st.metric("Suppliers", len(supplier_result.get('suppliers', [])))
+            
+            if supplier_result.get('key_findings'):
+                st.markdown("**Key Findings:**")
+                for finding in supplier_result['key_findings']:
+                    st.markdown(f"• {finding}")
+            
+            st.markdown("---")
+            for i, supplier in enumerate(supplier_result.get('suppliers', [])):
+                with st.expander(f"**{i+1}. {supplier['name']}** - {supplier.get('score', 0):+.1f}/2.0"):
+                    st.markdown(f"**Supplies:** {supplier.get('supplies', 'N/A')}")
+                    st.markdown(f"**Importance:** {supplier.get('importance', 'N/A')}")
+                    
+                    if supplier.get('impact_analysis') and supplier['impact_analysis'].get('success'):
+                        impact = supplier['impact_analysis']
+                        if impact.get('summary'):
+                            st.info(impact['summary'])
+        else:
+            st.error(f"Error: {supplier_result.get('error')}")
+    
+    # TAB 5: Customers
+    with tab5:
+        st.markdown(f"## 👥 Customer Analysis: {ticker}")
+        
+        if not anthropic_api_key:
+            st.warning("⚠️ Anthropic API key required")
+        elif customer_result.get('success'):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Demand Score", f"{customer_result['score']}/10")
+            with col2:
+                st.metric("Outlook", customer_result['signal'])
+            with col3:
+                st.metric("Customers", len(customer_result.get('customers', [])))
+            
+            if customer_result.get('key_findings'):
+                st.markdown("**Key Findings:**")
+                for finding in customer_result['key_findings']:
+                    st.markdown(f"• {finding}")
+            
+            st.markdown("---")
+            for i, customer in enumerate(customer_result.get('customers', [])):
+                with st.expander(f"**{i+1}. {customer['name']}** - {customer.get('score', 0):+.1f}/2.0"):
+                    st.markdown(f"**Purchases:** {customer.get('purchases', 'N/A')}")
+                    st.markdown(f"**Importance:** {customer.get('importance', 'N/A')}")
+                    
+                    if customer.get('demand_analysis') and customer['demand_analysis'].get('success'):
+                        demand = customer['demand_analysis']
+                        if demand.get('summary'):
+                            st.info(demand['summary'])
+        else:
+            st.error(f"Error: {customer_result.get('error')}")
+    
+    # TAB 6: Macro
     with tab6:
         st.markdown(f"## 🌍 Macro Factors: {ticker}")
         
@@ -437,7 +560,7 @@ if analyze_btn and ticker:
             # Commodity
             com = macro_result.get('commodity', {})
             if com.get('success'):
-                with st.expander("🛢️ Commodity & Input Risk"):
+                with st.expander("🛢️ Commodity Risk"):
                     st.markdown(f"**Score:** {com.get('overall_score', 0):+.1f}/2.0")
                     if com.get('summary'):
                         st.info(com['summary'])
