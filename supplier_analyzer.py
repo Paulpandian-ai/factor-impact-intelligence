@@ -1,5 +1,5 @@
 """
-Supplier Analysis Module - Module 2 (COMPLETE FIX)
+Supplier Analysis Module - Module 2 (ENHANCED)
 Uses Claude AI to identify and analyze supplier relationships
 """
 
@@ -13,7 +13,7 @@ import re
 from typing import List, Dict, Optional
 
 # Set Edgar identity - CHANGE THIS TO YOUR EMAIL
-set_identity("Paul Balasubramanian factorimpactai@gmail.com")
+set_identity("Paul Balasubramanian pb2963@columbia.edu")
 
 
 class SupplierAnalyzer:
@@ -31,47 +31,76 @@ class SupplierAnalyzer:
         self.current_date = datetime.now()
     
     def get_company_10k(self, ticker: str) -> Optional[Dict]:
-        """Fetch the latest 10-K filing"""
+        """Fetch the latest 10-K filing with multiple fallback strategies"""
         try:
             company = Company(ticker)
             
-            # Get latest 10-K filings
-            tenk_filings = company.get_filings(form="10-K").latest(1)
-            
-            # Extract the first filing from the iterator
+            # Strategy 1: Try latest(1)
             filing = None
+            full_text = None
+            
             try:
-                # Filings object is iterable but not subscriptable
-                for f in tenk_filings:
+                filings = company.get_filings(form="10-K")
+                
+                # Try to get latest filing
+                latest_filings = filings.latest(1)
+                
+                # Iterate to get first filing
+                for f in latest_filings:
                     filing = f
                     break
-            except:
-                pass
+                
+            except Exception as e:
+                print(f"Strategy 1 failed: {e}")
             
+            # Strategy 2: If Strategy 1 failed, try getting all recent filings
+            if not filing:
+                try:
+                    all_filings = company.get_filings(form="10-K")
+                    
+                    # Try to iterate and get the most recent one
+                    filing_list = []
+                    for f in all_filings:
+                        filing_list.append(f)
+                        if len(filing_list) >= 5:  # Get up to 5 recent filings
+                            break
+                    
+                    if filing_list:
+                        # Sort by filing date (most recent first)
+                        filing_list.sort(key=lambda x: x.filing_date, reverse=True)
+                        filing = filing_list[0]
+                    
+                except Exception as e:
+                    print(f"Strategy 2 failed: {e}")
+            
+            # If we still don't have a filing, return error
             if not filing:
                 return {
                     'success': False,
-                    'error': 'No 10-K filings found',
+                    'error': 'No 10-K filings found - company may not file 10-Ks or may be foreign issuer (files 20-F)',
                     'ticker': ticker.upper()
                 }
             
-            # Get full text
-            full_text = None
+            # Get full text with multiple strategies
             try:
                 full_text = filing.text()
             except:
-                # Fallback: try HTML
                 try:
+                    # Try getting HTML and converting to text
                     html_content = filing.html()
-                    # Convert HTML to string
                     full_text = str(html_content)
+                    
+                    # Clean HTML tags if needed
+                    import re
+                    full_text = re.sub('<[^<]+?>', ' ', full_text)
+                    
                 except:
                     pass
             
-            if not full_text:
+            if not full_text or len(full_text) < 1000:
                 return {
                     'success': False,
-                    'error': 'Could not extract filing text',
+                    'error': 'Could not extract filing text or text too short',
                     'ticker': ticker.upper()
                 }
             
@@ -85,9 +114,18 @@ class SupplierAnalyzer:
             }
             
         except Exception as e:
+            # Check if it's a foreign company issue
+            error_msg = str(e)
+            if 'foreign' in error_msg.lower() or '20-F' in error_msg:
+                return {
+                    'success': False,
+                    'error': f'Company may be a foreign issuer that files 20-F instead of 10-K. Error: {error_msg}',
+                    'ticker': ticker.upper()
+                }
+            
             return {
                 'success': False,
-                'error': f"Error fetching 10-K: {str(e)}",
+                'error': f"Error fetching 10-K: {error_msg}",
                 'ticker': ticker.upper()
             }
     
@@ -233,8 +271,9 @@ Only return valid JSON, no other text."""
             
             # Try 10-K
             try:
-                tenk = company.get_filings(form="10-K").latest(1)
-                for f in tenk:
+                filings = company.get_filings(form="10-K")
+                latest = filings.latest(1)
+                for f in latest:
                     filing = f
                     break
             except:
@@ -243,8 +282,9 @@ Only return valid JSON, no other text."""
             # Try 10-Q if 10-K failed
             if not filing:
                 try:
-                    tenq = company.get_filings(form="10-Q").latest(1)
-                    for f in tenq:
+                    filings = company.get_filings(form="10-Q")
+                    latest = filings.latest(1)
+                    for f in latest:
                         filing = f
                         break
                 except:
@@ -260,6 +300,9 @@ Only return valid JSON, no other text."""
             except:
                 try:
                     full_text = str(filing.html())
+                    # Clean HTML tags
+                    import re
+                    full_text = re.sub('<[^<]+?>', ' ', full_text)
                 except:
                     pass
             
@@ -461,6 +504,13 @@ Only return valid JSON."""
         
         suppliers = supplier_extraction['suppliers'][:5]  # Top 5
         
+        if not suppliers:
+            return {
+                'success': False,
+                'error': 'No suppliers identified in 10-K filing',
+                'ticker': ticker.upper()
+            }
+        
         if verbose:
             print(f"✅ Identified {len(suppliers)} key suppliers\n")
             print("Step 3: Analyzing each supplier...\n")
@@ -554,25 +604,5 @@ Only return valid JSON."""
             'suppliers': analyzed_suppliers,
             'filing_date': filing_data['filing_date'],
             'tokens_used': total_tokens,
-            'estimated_cost': total_tokens * 0.003 / 1000  # $3 per 1M input tokens
+            'estimated_cost': total_tokens * 0.003 / 1000
         }
-
-
-# Test function
-if __name__ == "__main__":
-    import os
-    
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
-    
-    if not api_key:
-        print("❌ Please set ANTHROPIC_API_KEY environment variable")
-    else:
-        analyzer = SupplierAnalyzer(api_key)
-        result = analyzer.analyze("NVDA")
-        
-        if result['success']:
-            print(f"\nSupplier Risk Score: {result['score']}/10")
-            print(f"Risk Level: {result['signal']}")
-            print(f"\nTop Suppliers:")
-            for s in result['suppliers']:
-                print(f"  • {s['name']}: {s['score']:+.1f}/2.0")
