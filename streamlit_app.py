@@ -1,5 +1,6 @@
 """
-Factor Impact Intelligence - Enhanced with Web Search Supplier Analysis
+Factor Impact Intelligence - With Customer Analysis (Module 3)
+Modules: Monetary + Company + Suppliers + Customers
 """
 
 import streamlit as st
@@ -15,12 +16,13 @@ warnings.filterwarnings('ignore')
 # Import analyzers
 from company_analyzer import CompanyPerformanceAnalyzer
 from supplier_analyzer import SupplierAnalyzer
+from customer_analyzer import CustomerAnalyzer
 
 st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
 
 # Header
 st.markdown("# 💰 Factor Impact Intelligence")
-st.markdown("### AI-Powered Multi-Factor Stock Analysis")
+st.markdown("### Complete Supply Chain & Demand Analysis")
 
 # Sidebar
 with st.sidebar:
@@ -44,16 +46,13 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("""
-    ### 🚀 Enhanced Features
-    - ✅ Web search for supplier identification
-    - ✅ Deep 10-K analysis
-    - ✅ Quantitative + Qualitative impact
-    - ✅ Opportunities, Challenges, Risks
-    
-    ### Modules Active
+    ### 📊 Analysis Modules
     - ✅ Module 0: Monetary Factors
     - ✅ Module 1: Company Performance
-    - ✅ Module 2: Enhanced Supplier Analysis
+    - ✅ Module 2: Supplier Analysis
+    - ✅ Module 3: Customer Analysis
+    - 🔜 Module 5: Macro Factors
+    - 🔜 Module 8: Analyst Critique
     """)
 
 
@@ -193,10 +192,8 @@ class MonetaryFactorAnalyzer:
             signal = "BUY"
         elif composite >= 5.5:
             signal = "HOLD (Lean Buy)"
-        elif composite >= 4.5:
-            signal = "HOLD"
         else:
-            signal = "SELL"
+            signal = "HOLD/SELL"
         
         return {
             'success': True, 'ticker': ticker.upper(), 'score': composite,
@@ -221,9 +218,9 @@ with col2:
 
 if analyze_btn and ticker:
     # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary", "💰 Monetary", "📄 Company", "🏭 Suppliers"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Summary", "💰 Monetary", "📄 Company", "🏭 Suppliers", "👥 Customers"])
     
-    with st.spinner(f"Analyzing {ticker} across all modules..."):
+    with st.spinner(f"Analyzing {ticker} - this may take 60-90 seconds..."):
         # Monetary Analysis
         monetary_analyzer = MonetaryFactorAnalyzer(fred_api_key=fred_api_key)
         try:
@@ -238,7 +235,7 @@ if analyze_btn and ticker:
         except Exception as e:
             company_result = {'success': False, 'error': str(e)}
         
-        # Supplier Analysis (Enhanced with web search)
+        # Supplier Analysis
         try:
             if anthropic_api_key:
                 supplier_analyzer = SupplierAnalyzer(anthropic_api_key=anthropic_api_key)
@@ -247,30 +244,45 @@ if analyze_btn and ticker:
                 supplier_result = {'success': False, 'error': 'Anthropic API key required'}
         except Exception as e:
             supplier_result = {'success': False, 'error': str(e)}
+        
+        # Customer Analysis (NEW!)
+        try:
+            if anthropic_api_key:
+                customer_analyzer = CustomerAnalyzer(anthropic_api_key=anthropic_api_key)
+                customer_result = customer_analyzer.analyze(ticker, verbose=False)
+            else:
+                customer_result = {'success': False, 'error': 'Anthropic API key required'}
+        except Exception as e:
+            customer_result = {'success': False, 'error': str(e)}
     
     # TAB 1: Summary
     with tab1:
-        st.markdown(f"## {ticker} - Multi-Module Analysis")
+        st.markdown(f"## {ticker} - Complete Analysis")
         
         monetary_ok = monetary_result.get('success', False)
         company_ok = company_result.get('success', False)
         supplier_ok = supplier_result.get('success', False)
+        customer_ok = customer_result.get('success', False)
         
-        if monetary_ok or company_ok or supplier_ok:
+        if monetary_ok or company_ok or supplier_ok or customer_ok:
             scores = []
             weights = []
             
             if monetary_ok:
                 scores.append(monetary_result['score'])
-                weights.append(0.4)
+                weights.append(0.30)  # 30%
             
             if company_ok:
                 scores.append(company_result['score'])
-                weights.append(0.35)
+                weights.append(0.30)  # 30%
             
             if supplier_ok:
                 scores.append(supplier_result['score'])
-                weights.append(0.25)
+                weights.append(0.20)  # 20%
+            
+            if customer_ok:
+                scores.append(customer_result['score'])
+                weights.append(0.20)  # 20%
             
             total_weight = sum(weights)
             normalized_weights = [w/total_weight for w in weights]
@@ -293,22 +305,19 @@ if analyze_btn and ticker:
             with col2:
                 st.metric("Overall Signal", overall_signal)
             with col3:
-                modules_active = sum([monetary_ok, company_ok, supplier_ok])
-                st.metric("Modules Active", f"{modules_active}/3")
+                modules_active = sum([monetary_ok, company_ok, supplier_ok, customer_ok])
+                st.metric("Modules Active", f"{modules_active}/4")
             
             # Module breakdown
             st.markdown("---")
             st.markdown("### 📊 Module Breakdown")
             
-            if supplier_ok:
-                col1, col2, col3 = st.columns(3)
-            else:
-                col1, col2 = st.columns(2)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 if monetary_ok:
                     score = monetary_result['score']
-                    color = "🟢" if score >= 7.5 else "🟡" if score >= 6.5 else "🔴"
+                    color = "🟢" if score >= 7 else "🟡" if score >= 6 else "🔴"
                     st.markdown(f"#### {color} Monetary")
                     st.metric("Score", f"{score}/10")
                     st.caption(monetary_result['signal'])
@@ -316,18 +325,47 @@ if analyze_btn and ticker:
             with col2:
                 if company_ok:
                     score = company_result['score']
-                    color = "🟢" if score >= 7.5 else "🟡" if score >= 6.5 else "🔴"
+                    color = "🟢" if score >= 7 else "🟡" if score >= 6 else "🔴"
                     st.markdown(f"#### {color} Company")
                     st.metric("Score", f"{score}/10")
                     st.caption(company_result['signal'])
             
-            if supplier_ok:
-                with col3:
+            with col3:
+                if supplier_ok:
                     score = supplier_result['score']
-                    color = "🟢" if score >= 7.0 else "🟡" if score >= 5.5 else "🔴"
-                    st.markdown(f"#### {color} Suppliers")
-                    st.metric("Risk Score", f"{score}/10")
+                    color = "🟢" if score >= 7 else "🟡" if score >= 5.5 else "🔴"
+                    st.markdown(f"#### {color} Supply")
+                    st.metric("Risk", f"{score}/10")
                     st.caption(supplier_result['signal'])
+            
+            with col4:
+                if customer_ok:
+                    score = customer_result['score']
+                    color = "🟢" if score >= 7 else "🟡" if score >= 5.5 else "🔴"
+                    st.markdown(f"#### {color} Demand")
+                    st.metric("Score", f"{score}/10")
+                    st.caption(customer_result['signal'])
+            
+            # Key insights
+            st.markdown("---")
+            st.markdown("### 💡 Key Insights")
+            
+            insights = []
+            
+            # Supply chain insights
+            if supplier_ok and supplier_result.get('key_findings'):
+                insights.append("**Supply Chain:**")
+                for finding in supplier_result['key_findings'][:2]:
+                    insights.append(f"  • {finding}")
+            
+            # Demand insights
+            if customer_ok and customer_result.get('key_findings'):
+                insights.append("**Customer Demand:**")
+                for finding in customer_result['key_findings'][:2]:
+                    insights.append(f"  • {finding}")
+            
+            for insight in insights:
+                st.markdown(insight)
         else:
             st.error("All modules failed")
     
@@ -351,20 +389,12 @@ if analyze_btn and ticker:
             with col1:
                 st.markdown("#### 🏦 Fed Rate")
                 st.metric("Score", f"{monetary_result['fed_score']:+.1f}/2.0")
-                if monetary_result.get('fed'):
-                    st.info(f"Current: {monetary_result['fed']['current']:.2f}%")
-            
             with col2:
                 st.markdown("#### 📊 Inflation")
                 st.metric("Score", f"{monetary_result['inf_score']:+.1f}/2.0")
-                if monetary_result.get('inf'):
-                    st.info(f"YoY: {monetary_result['inf']['yoy']:.2f}%")
-            
             with col3:
                 st.markdown("#### 📈 Yields")
                 st.metric("Score", f"{monetary_result['yld_score']:+.1f}/2.0")
-                if monetary_result.get('yld'):
-                    st.info(f"10Y: {monetary_result['yld']['current']:.2f}%")
         else:
             st.error(f"Error: {monetary_result.get('error')}")
     
@@ -379,9 +409,6 @@ if analyze_btn and ticker:
             with col2:
                 st.metric("Signal", company_result['signal'])
             
-            if company_result.get('data_date'):
-                st.caption(f"📅 Data: {company_result['data_date']}")
-            
             factors = company_result.get('factors', {})
             
             col1, col2, col3 = st.columns(3)
@@ -389,156 +416,155 @@ if analyze_btn and ticker:
                 st.markdown("#### 📊 Revenue")
                 rev = factors.get('revenue_growth', {})
                 st.metric("Score", f"{rev.get('score', 0):+.1f}/2.0")
-                st.caption(rev.get('reasoning', 'N/A'))
-            
             with col2:
                 st.markdown("#### 📈 Margins")
                 margin = factors.get('margins', {})
                 st.metric("Score", f"{margin.get('score', 0):+.1f}/2.0")
-                st.caption(margin.get('reasoning', 'N/A'))
-            
             with col3:
                 st.markdown("#### 🏥 Health")
                 health = factors.get('financial_health', {})
                 st.metric("Score", f"{health.get('score', 0):+.1f}/2.0")
-                st.caption(health.get('reasoning', 'N/A'))
         else:
             st.error(f"Error: {company_result.get('error')}")
     
-    # TAB 4: Enhanced Supplier Analysis
+    # TAB 4: Suppliers
     with tab4:
-        st.markdown(f"## 🏭 Enhanced Supplier Analysis: {ticker}")
+        st.markdown(f"## 🏭 Supplier Analysis: {ticker}")
         
         if not anthropic_api_key:
             st.warning("⚠️ Anthropic API key required")
-            st.info("Add your API key in the sidebar")
         elif supplier_result.get('success'):
-            # Header metrics
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Risk Score", f"{supplier_result['score']}/10")
             with col2:
                 st.metric("Risk Level", supplier_result['signal'])
             with col3:
                 st.metric("Suppliers", len(supplier_result.get('suppliers', [])))
-            with col4:
-                st.metric("API Cost", f"${supplier_result.get('estimated_cost', 0):.3f}")
-            
-            st.caption(f"🔍 Search Quality: {supplier_result.get('search_quality', 'Unknown')}")
-            st.caption(f"💰 Tokens Used: {supplier_result.get('tokens_used', 0):,}")
-            
-            # Overall assessment
-            st.markdown("---")
-            st.markdown("### 🎯 Overall Assessment")
-            st.info(f"**Overall Risk:** {supplier_result.get('overall_supplier_risk', 'Unknown')}")
             
             if supplier_result.get('key_findings'):
                 st.markdown("**Key Findings:**")
                 for finding in supplier_result['key_findings']:
                     st.markdown(f"• {finding}")
             
-            # Detailed supplier analysis
+            # Supplier details
+            for i, supplier in enumerate(supplier_result.get('suppliers', [])):
+                with st.expander(f"**{i+1}. {supplier['name']}** - {supplier.get('score', 0):+.1f}/2.0"):
+                    st.markdown(f"**Supplies:** {supplier.get('supplies', 'N/A')}")
+                    st.markdown(f"**Importance:** {supplier.get('importance', 'N/A')}")
+                    
+                    if supplier.get('impact_analysis') and supplier['impact_analysis'].get('success'):
+                        impact = supplier['impact_analysis']
+                        if impact.get('summary'):
+                            st.info(impact['summary'])
+        else:
+            st.error(f"Error: {supplier_result.get('error')}")
+    
+    # TAB 5: Customers (NEW!)
+    with tab5:
+        st.markdown(f"## 👥 Customer Analysis: {ticker}")
+        
+        if not anthropic_api_key:
+            st.warning("⚠️ Anthropic API key required")
+        elif customer_result.get('success'):
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Demand Score", f"{customer_result['score']}/10")
+            with col2:
+                st.metric("Outlook", customer_result['signal'])
+            with col3:
+                st.metric("Customers", len(customer_result.get('customers', [])))
+            with col4:
+                st.metric("Concentration", customer_result.get('overall_concentration', 'Unknown'))
+            
+            st.caption(f"💰 API Cost: ${customer_result.get('estimated_cost', 0):.3f}")
+            
+            if customer_result.get('key_findings'):
+                st.markdown("**Key Findings:**")
+                for finding in customer_result['key_findings']:
+                    st.markdown(f"• {finding}")
+            
             st.markdown("---")
-            st.markdown("### 📋 Detailed Supplier Analysis")
+            st.markdown("### 📋 Customer Details")
             
-            suppliers = supplier_result.get('suppliers', [])
-            
-            for i, supplier in enumerate(suppliers):
+            for i, customer in enumerate(customer_result.get('customers', [])):
                 with st.expander(
-                    f"**{i+1}. {supplier['name']}** ({supplier.get('ticker', 'PRIVATE')}) - Score: {supplier.get('score', 0):+.1f}/2.0",
+                    f"**{i+1}. {customer['name']}** ({customer.get('ticker', 'PRIVATE')}) - Score: {customer.get('score', 0):+.1f}/2.0",
                     expanded=(i==0)
                 ):
-                    # Basic Info
                     col1, col2 = st.columns([2, 1])
                     
                     with col1:
-                        st.markdown(f"**Supplies:** {supplier.get('supplies', 'N/A')}")
-                        st.markdown(f"**Importance:** {supplier.get('importance', 'N/A')}")
-                        st.markdown(f"**Financial Exposure:** {supplier.get('financial_exposure', 'Not disclosed')}")
-                        if supplier.get('recent_context'):
-                            st.markdown(f"**Recent:** {supplier['recent_context']}")
+                        st.markdown(f"**Purchases:** {customer.get('purchases', 'N/A')}")
+                        st.markdown(f"**Importance:** {customer.get('importance', 'N/A')}")
+                        st.markdown(f"**Revenue Contribution:** {customer.get('revenue_contribution', 'Not disclosed')}")
+                        st.markdown(f"**CapEx Trend:** {customer.get('capex_trend', 'Unknown')}")
+                        if customer.get('recent_developments'):
+                            st.markdown(f"**Recent:** {customer['recent_developments']}")
                     
                     with col2:
-                        if supplier.get('ticker') != 'PRIVATE':
-                            st.metric("Ticker", supplier['ticker'])
+                        if customer.get('ticker') != 'PRIVATE':
+                            st.metric("Ticker", customer['ticker'])
                         else:
-                            st.caption("🔒 Private Company")
+                            st.caption("🔒 Private")
                     
-                    # Financial Metrics
-                    if supplier.get('financials'):
+                    # Financial metrics
+                    if customer.get('financials'):
                         st.markdown("---")
-                        st.markdown("**📊 Financial Metrics**")
+                        st.markdown("**📊 Financial Health**")
                         
-                        fin = supplier['financials']
+                        fin = customer['financials']
                         col1, col2, col3, col4 = st.columns(4)
                         
                         with col1:
                             if fin.get('market_cap'):
                                 st.metric("Market Cap", f"${fin['market_cap']/1e9:.1f}B")
                         with col2:
-                            if fin.get('revenue'):
-                                st.metric("Revenue (Q)", f"${fin['revenue']/1e9:.1f}B")
-                        with col3:
-                            if fin.get('profit_margin'):
-                                st.metric("Margin", f"{fin['profit_margin']*100:.1f}%")
-                        with col4:
                             if fin.get('revenue_growth'):
-                                st.metric("Growth", f"{fin['revenue_growth']:+.1f}%")
+                                st.metric("Revenue Growth", f"{fin['revenue_growth']:+.1f}%")
+                        with col3:
+                            if fin.get('capex'):
+                                st.metric("CapEx (Q)", f"${fin['capex']/1e9:.2f}B")
+                        with col4:
+                            if fin.get('capex_growth'):
+                                st.metric("CapEx Growth", f"{fin['capex_growth']:+.1f}%")
                     
-                    # Impact Analysis
-                    if supplier.get('impact_analysis') and supplier['impact_analysis'].get('success'):
-                        impact = supplier['impact_analysis']
+                    # Demand analysis
+                    if customer.get('demand_analysis') and customer['demand_analysis'].get('success'):
+                        demand = customer['demand_analysis']
                         
                         st.markdown("---")
-                        st.markdown("**🎯 Impact Analysis**")
+                        st.markdown("**🎯 Demand Assessment**")
                         
-                        # Quantitative
-                        if impact.get('quantitative'):
-                            st.markdown("**📊 Quantitative Impact:**")
-                            quant = impact['quantitative']
-                            st.markdown(f"• **Financial Scale:** {quant.get('financial_scale', 'N/A')}")
-                            st.markdown(f"• **Capacity:** {quant.get('capacity_assessment', 'N/A')}")
-                            st.markdown(f"• **Investment:** {quant.get('investment_outlook', 'N/A')}")
-                            st.markdown(f"• **Dependency:** {quant.get('mutual_dependency', 'N/A')}")
+                        if demand.get('demand_assessment'):
+                            assess = demand['demand_assessment']
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"• **Growth:** {assess.get('growth_trajectory', 'N/A')}")
+                                st.markdown(f"• **CapEx:** {assess.get('capex_momentum', 'N/A')}")
+                            with col2:
+                                st.markdown(f"• **Priority:** {assess.get('strategic_priority', 'N/A')}")
+                                st.markdown(f"• **Budget:** {assess.get('budget_health', 'N/A')}")
                         
-                        # Qualitative
-                        if impact.get('qualitative'):
-                            st.markdown("**💭 Qualitative Impact:**")
-                            qual = impact['qualitative']
-                            st.markdown(f"• **Strategic Importance:** {qual.get('strategic_importance', 'N/A')}")
-                            st.markdown(f"• **Relationship:** {qual.get('relationship_strength', 'N/A')}")
-                            st.markdown(f"• **Risk Level:** {qual.get('risk_level', 'N/A')}")
-                            st.markdown(f"• **Alternatives:** {qual.get('alternative_availability', 'N/A')}")
+                        if demand.get('summary'):
+                            st.info(f"**Summary:** {demand['summary']}")
                         
-                        # Opportunities, Challenges, Risks
-                        col1, col2, col3 = st.columns(3)
+                        # Opportunities and Risks
+                        col1, col2 = st.columns(2)
                         
                         with col1:
-                            if impact.get('opportunities'):
+                            if demand.get('opportunities'):
                                 st.success("**✅ Opportunities**")
-                                for opp in impact['opportunities']:
+                                for opp in demand['opportunities']:
                                     st.markdown(f"• {opp}")
                         
                         with col2:
-                            if impact.get('challenges'):
-                                st.warning("**⚠️ Challenges**")
-                                for ch in impact['challenges']:
-                                    st.markdown(f"• {ch}")
-                        
-                        with col3:
-                            if impact.get('risks'):
+                            if demand.get('risks'):
                                 st.error("**🚨 Risks**")
-                                for risk in impact['risks']:
+                                for risk in demand['risks']:
                                     st.markdown(f"• {risk}")
-                        
-                        # Summary and Reliability
-                        if impact.get('summary'):
-                            st.info(f"**Summary:** {impact['summary']}")
-                        
-                        if impact.get('reliability_score'):
-                            st.metric("Reliability Score", f"{impact['reliability_score']}/10")
         else:
-            st.error(f"❌ Error: {supplier_result.get('error', 'Unknown error')}")
+            st.error(f"❌ Error: {customer_result.get('error')}")
 
 # Disclaimer
 st.markdown("---")
