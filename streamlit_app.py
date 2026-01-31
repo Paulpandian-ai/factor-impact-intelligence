@@ -1,6 +1,6 @@
 """
 Factor Impact Intelligence - Complete Platform
-All 5 modules fully implemented with complete UI
+FINAL VERSION with enhanced Macro tab that handles all edge cases
 """
 
 import streamlit as st
@@ -503,85 +503,169 @@ if analyze_btn and ticker:
         else:
             st.error(f"Error: {customer_result.get('error')}")
     
-    # TAB 6: Macro
+    # TAB 6: Macro Factors (FULLY ENHANCED)
     with tab6:
         st.markdown(f"## 🌍 Macro Factors: {ticker}")
         
         if not anthropic_api_key:
             st.warning("⚠️ Anthropic API key required")
         elif macro_result.get('success'):
+            # Header
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Macro Score", f"{macro_result['score']}/10")
             with col2:
                 st.metric("Assessment", macro_result['signal'])
             with col3:
-                st.metric("API Cost", f"${macro_result.get('estimated_cost', 0):.3f}")
+                cost = macro_result.get('estimated_cost', 0)
+                st.metric("API Cost", f"${cost:.3f}")
             
             st.markdown("---")
             st.markdown("### 📊 Factor Breakdown")
+            st.caption("Weights: 🌍 Geopolitical 30% | ⚖️ Regulatory 25% | 📈 Industry 25% | 🛢️ Commodity 15% | 🌱 ESG 5%")
+            st.markdown("")
             
-            # Geopolitical
-            geo = macro_result.get('geopolitical', {})
-            if geo.get('success'):
-                with st.expander("🌍 Geopolitical Risk", expanded=True):
-                    st.markdown(f"**Score:** {geo.get('overall_score', 0):+.1f}/2.0")
+            # Get categories - MORE DEFENSIVE
+            geo = macro_result.get('geopolitical') or {}
+            reg = macro_result.get('regulatory') or {}
+            ind = macro_result.get('industry') or {}
+            com = macro_result.get('commodity') or {}
+            esg = macro_result.get('esg') or {}
+            
+            # 1. GEOPOLITICAL
+            with st.expander("🌍 **Geopolitical Risk** (30% weight)", expanded=True):
+                if geo and (geo.get('success') or geo.get('overall_score') is not None):
+                    score = geo.get('overall_score', 0)
+                    
+                    if score >= 0:
+                        st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
+                    elif score >= -1:
+                        st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
+                    else:
+                        st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
+                    
                     if geo.get('summary'):
+                        st.markdown("**Summary:**")
                         st.info(geo['summary'])
+                    
                     if geo.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in geo['key_risks']:
                             st.markdown(f"• {risk}")
+                else:
+                    st.error("Geopolitical analysis not available")
             
-            # Regulatory
-            reg = macro_result.get('regulatory', {})
-            if reg.get('success'):
-                with st.expander("⚖️ Regulatory Risk"):
-                    st.markdown(f"**Score:** {reg.get('overall_score', 0):+.1f}/2.0")
+            # 2. REGULATORY
+            with st.expander("⚖️ **Regulatory Risk** (25% weight)"):
+                if reg and (reg.get('success') or reg.get('overall_score') is not None):
+                    score = reg.get('overall_score', 0)
+                    
+                    if score >= 0:
+                        st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
+                    elif score >= -1:
+                        st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
+                    else:
+                        st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
+                    
                     if reg.get('summary'):
+                        st.markdown("**Summary:**")
                         st.info(reg['summary'])
+                    
                     if reg.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in reg['key_risks']:
                             st.markdown(f"• {risk}")
+                else:
+                    st.error("Regulatory analysis not available")
             
-            # Industry
-            ind = macro_result.get('industry', {})
-            if ind.get('success'):
-                with st.expander("📈 Industry Dynamics"):
-                    st.markdown(f"**Score:** {ind.get('overall_score', 0):+.1f}/2.0")
+            # 3. INDUSTRY
+            with st.expander("📈 **Industry Dynamics** (25% weight)"):
+                if ind and (ind.get('success') or ind.get('overall_score') is not None):
+                    score = ind.get('overall_score', 0)
+                    
+                    if score >= 1:
+                        st.success(f"**Score: {score:+.1f}/2.0** (Strong)")
+                    elif score >= 0:
+                        st.info(f"**Score: {score:+.1f}/2.0** (Neutral)")
+                    else:
+                        st.warning(f"**Score: {score:+.1f}/2.0** (Weak)")
+                    
                     if ind.get('summary'):
+                        st.markdown("**Summary:**")
                         st.info(ind['summary'])
+                    
                     if ind.get('key_trends'):
                         st.markdown("**Key Trends:**")
                         for trend in ind['key_trends']:
                             st.markdown(f"• {trend}")
+                else:
+                    st.error("Industry analysis not available")
             
-            # Commodity
-            com = macro_result.get('commodity', {})
-            if com.get('success'):
-                with st.expander("🛢️ Commodity Risk"):
-                    st.markdown(f"**Score:** {com.get('overall_score', 0):+.1f}/2.0")
+            # 4. COMMODITY
+            with st.expander("🛢️ **Commodity & Input Risk** (15% weight)"):
+                if com and (com.get('success') or com.get('overall_score') is not None):
+                    score = com.get('overall_score', 0)
+                    
+                    if score >= 0:
+                        st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
+                    elif score >= -1:
+                        st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
+                    else:
+                        st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
+                    
                     if com.get('summary'):
+                        st.markdown("**Summary:**")
                         st.info(com['summary'])
+                    
                     if com.get('key_risks'):
                         st.markdown("**Key Risks:**")
                         for risk in com['key_risks']:
                             st.markdown(f"• {risk}")
+                else:
+                    st.error("Commodity analysis not available")
             
-            # ESG
-            esg = macro_result.get('esg', {})
-            if esg.get('success'):
-                with st.expander("🌱 ESG Factors"):
-                    st.markdown(f"**Score:** {esg.get('overall_score', 0):+.1f}/2.0")
+            # 5. ESG
+            with st.expander("🌱 **ESG Factors** (5% weight)"):
+                if esg and (esg.get('success') or esg.get('overall_score') is not None):
+                    score = esg.get('overall_score', 0)
+                    
+                    if score >= 0:
+                        st.success(f"**Score: {score:+.1f}/2.0** (Low Risk)")
+                    elif score >= -1:
+                        st.warning(f"**Score: {score:+.1f}/2.0** (Moderate Risk)")
+                    else:
+                        st.error(f"**Score: {score:+.1f}/2.0** (High Risk)")
+                    
                     if esg.get('summary'):
+                        st.markdown("**Summary:**")
                         st.info(esg['summary'])
+                    
                     if esg.get('key_issues'):
                         st.markdown("**Key Issues:**")
                         for issue in esg['key_issues']:
                             st.markdown(f"• {issue}")
+                else:
+                    st.error("ESG analysis not available")
+            
+            # Overall calculation
+            st.markdown("---")
+            st.markdown("### 💡 Overall Macro Assessment")
+            
+            weights = macro_result.get('weights', {})
+            
+            st.markdown(f"""
+**Weighted Calculation:**
+- 🌍 Geopolitical: {geo.get('overall_score', 0):+.1f} × 30% = {geo.get('overall_score', 0) * 0.30:+.2f}
+- ⚖️ Regulatory: {reg.get('overall_score', 0):+.1f} × 25% = {reg.get('overall_score', 0) * 0.25:+.2f}
+- 📈 Industry: {ind.get('overall_score', 0):+.1f} × 25% = {ind.get('overall_score', 0) * 0.25:+.2f}
+- 🛢️ Commodity: {com.get('overall_score', 0):+.1f} × 15% = {com.get('overall_score', 0) * 0.15:+.2f}
+- 🌱 ESG: {esg.get('overall_score', 0):+.1f} × 5% = {esg.get('overall_score', 0) * 0.05:+.2f}
+
+**Final Score:** {macro_result['score']}/10 → {macro_result['signal']}
+""")
+            
         else:
-            st.error(f"❌ Error: {macro_result.get('error')}")
+            st.error(f"❌ Error: {macro_result.get('error', 'Unknown error')}")
 
 # Disclaimer
 st.markdown("---")
