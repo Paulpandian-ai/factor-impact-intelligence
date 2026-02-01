@@ -1,6 +1,6 @@
 """
-Enhanced Supplier Analysis Module - ROBUST VERSION
-Handles web search responses more carefully
+Enhanced Supplier Analysis Module - WITH CACHING & RATE LIMIT HANDLING
+Caches web search results and supplier data to reduce API costs
 """
 
 from edgar import Company, set_identity
@@ -11,15 +11,24 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import json
 import re
+import time
 
-# CHANGE THIS TO YOUR EMAIL
+# Import cache manager
+try:
+    from cache_manager import DataCacheManager
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    print("⚠️ cache_manager not found - running without caching")
+
+# Set Edgar identity
 set_identity("Paul Balasubramanian pb2963@columbia.edu")
 
 
 class SupplierAnalyzer:
-    """Enhanced supplier analysis using web search + 10-K analysis"""
+    """Enhanced supplier analysis with caching and rate limit handling"""
     
-    def __init__(self, anthropic_api_key: Optional[str] = None):
+    def __init__(self, anthropic_api_key: Optional[str] = None, use_cache: bool = True):
         """Initialize with Anthropic API key"""
         self.api_key = anthropic_api_key or os.environ.get('ANTHROPIC_API_KEY')
         if not self.api_key:
@@ -28,9 +37,24 @@ class SupplierAnalyzer:
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.current_date = datetime.now()
         self.total_tokens = 0
+        self.use_cache = use_cache and CACHE_AVAILABLE
+        
+        if self.use_cache:
+            self.cache = DataCacheManager()
+    
+    def _rate_limit_delay(self, seconds: float = 2.0):
+        """Add delay between API calls to avoid rate limits"""
+        time.sleep(seconds)
     
     def identify_suppliers_with_web_search(self, ticker: str, company_name: str) -> Dict:
-        """Use Claude with web search to identify top 5 suppliers"""
+        """Use Claude with web search to identify top 5 suppliers - WITH CACHING"""
+        
+        # Check cache first (suppliers don't change often - cache for 7 days)
+        if self.use_cache:
+            cached = self.cache.get('supplier_list', ticker=ticker)
+            if cached:
+                cached['_from_cache'] = True
+                return cached
         
         prompt = f"""Search the web to identify the TOP 5 most critical suppliers for {company_name} ({ticker}).
 
@@ -73,6 +97,9 @@ Return your findings in this EXACT JSON format with NO other text before or afte
 CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
         
         try:
+            # Rate limit protection
+            self._rate_limit_delay(1.0)
+            
             # Call Claude with web search tool
             message = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
@@ -112,7 +139,6 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             elif "```" in response_text:
                 response_text = response_text.split("```")[1].split("```")[0]
             
-            # Remove any leading/trailing text that's not JSON
             # Find the first { and last }
             start = response_text.find('{')
             end = response_text.rfind('}')
@@ -148,14 +174,27 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             if not isinstance(suppliers, list):
                 suppliers = []
             
-            return {
+            final_result = {
                 'success': True,
                 'suppliers': suppliers[:5],
                 'overall_risk': result.get('overall_risk_assessment', 'Medium'),
                 'key_findings': result.get('key_findings', []),
-                'search_quality': result.get('search_quality', 'Medium')
+                'search_quality': result.get('search_quality', 'Medium'),
+                '_from_cache': False
             }
             
+            # Cache the result
+            if self.use_cache:
+                self.cache.set('supplier_list', final_result, ticker=ticker, cost=0.05)
+            
+            return final_result
+            
+        except anthropic.RateLimitError as e:
+            return {
+                'success': False,
+                'error': f"Rate limit error: {str(e)}. Please wait 60 seconds and try again.",
+                'suppliers': []
+            }
         except Exception as e:
             return {
                 'success': False,
@@ -164,7 +203,14 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             }
     
     def get_supplier_10k(self, ticker: str) -> Optional[Dict]:
-        """Fetch supplier's latest 10-K filing"""
+        """Fetch supplier's latest 10-K filing - WITH CACHING"""
+        
+        # Check cache first
+        if self.use_cache:
+            cached = self.cache.get('sec_filing_text', ticker=ticker)
+            if cached:
+                return cached
+        
         try:
             company = Company(ticker)
             
@@ -187,7 +233,6 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             except:
                 try:
                     full_text = str(filing.html())
-                    # Clean HTML
                     full_text = re.sub('<[^<]+?>', ' ', full_text)
                 except:
                     return None
@@ -195,7 +240,7 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             if not full_text or len(full_text) < 5000:
                 return None
             
-            # Extract MD&A and Risk sections (simplified)
+            # Extract MD&A and Risk sections
             mda_pattern = r"(?:ITEM\s+7|Item\s+7).*?(?:ITEM\s+[78]|Item\s+[78]|$)"
             risk_pattern = r"(?:ITEM\s+1A|Item\s+1A).*?(?:ITEM\s+[12B]|Item\s+[12B]|$)"
             
@@ -207,114 +252,113 @@ CRITICAL: Return ONLY valid JSON. No explanatory text before or after."""
             
             key_text = mda_text + "\n\n" + risk_text
             
-            return {
+            result = {
                 'success': True,
                 'company_name': company.name,
                 'filing_date': str(filing.filing_date),
                 'key_text': key_text[:45000]
             }
             
+            # Cache the result
+            if self.use_cache:
+                self.cache.set('sec_filing_text', result, ticker=ticker, cost=0.01)
+            
+            return result
+            
         except Exception as e:
             return None
     
     def get_supplier_financials(self, ticker: str) -> Optional[Dict]:
-        """Get key financial metrics for supplier"""
+        """Get key financial metrics for supplier - WITH CACHING"""
+        
+        if self.use_cache:
+            cached = self.cache.get('stock_fundamentals', ticker=ticker)
+            if cached:
+                return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
             
             income = stock.quarterly_financials
-            
             if income.empty:
                 return {
                     'ticker': ticker,
                     'market_cap': info.get('marketCap'),
-                    'revenue': None,
-                    'margin': info.get('profitMargins')
+                    'profit_margin': info.get('profitMargins'),
+                    'revenue': None
                 }
             
             latest_quarter = income.columns[0]
-            prev_quarter = income.columns[1] if len(income.columns) > 1 else None
-            
             revenue = income.loc['Total Revenue'].iloc[0] if 'Total Revenue' in income.index else None
-            revenue_prev = income.loc['Total Revenue'].iloc[1] if 'Total Revenue' in income.index and prev_quarter is not None else None
-            net_income = income.loc['Net Income'].iloc[0] if 'Net Income' in income.index else None
+            
+            prev_quarter = income.columns[4] if len(income.columns) > 4 else None
+            revenue_prev = income.loc['Total Revenue'].iloc[4] if 'Total Revenue' in income.index and prev_quarter is not None else None
             
             revenue_growth = None
             if revenue and revenue_prev:
                 revenue_growth = ((revenue - revenue_prev) / revenue_prev) * 100
             
-            return {
+            result = {
                 'ticker': ticker,
                 'company_name': info.get('longName', ticker),
                 'market_cap': info.get('marketCap'),
                 'revenue': revenue,
                 'revenue_growth': revenue_growth,
-                'net_income': net_income,
                 'profit_margin': info.get('profitMargins'),
-                'debt_to_equity': info.get('debtToEquity'),
-                'current_ratio': info.get('currentRatio'),
-                'latest_quarter': latest_quarter
+                'latest_quarter': str(latest_quarter)
             }
+            
+            if self.use_cache:
+                self.cache.set('stock_fundamentals', result, ticker=ticker, cost=0.001)
+            
+            return result
             
         except Exception as e:
             return None
     
-    def analyze_supplier_impact(self, supplier: Dict, supplier_10k: Dict, 
-                                financials: Dict, target_company: str) -> Dict:
-        """Use Claude to analyze supplier's impact"""
+    def analyze_supplier_impact(self, supplier: Dict, supplier_10k: Optional[Dict],
+                               financials: Optional[Dict], target_company: str) -> Dict:
+        """Analyze how this supplier could impact target company - WITH RATE LIMITING"""
         
-        supplier_name = supplier['name']
-        supplies = supplier.get('supplies', 'Unknown')
+        # Build context for analysis
+        context_parts = []
         
-        financial_context = ""
+        if supplier_10k and supplier_10k.get('key_text'):
+            context_parts.append(f"10-K excerpts:\n{supplier_10k['key_text'][:15000]}")
+        
         if financials:
-            mc = financials.get('market_cap', 0)
-            rev = financials.get('revenue', 0)
-            margin = financials.get('profit_margin', 0)
-            growth = financials.get('revenue_growth', 0)
-            
-            if mc:
-                financial_context += f"Market Cap: ${mc/1e9:.1f}B\n"
-            if rev:
-                financial_context += f"Revenue (latest quarter): ${rev/1e9:.1f}B\n"
-            if growth:
-                financial_context += f"Revenue Growth: {growth:+.1f}% QoQ\n"
-            if margin:
-                financial_context += f"Profit Margin: {margin*100:.1f}%\n"
+            context_parts.append(f"""
+Financial metrics:
+- Revenue: ${financials.get('revenue', 'N/A'):,.0f}
+- Revenue Growth: {financials.get('revenue_growth', 'N/A'):.1f}%
+- Profit Margin: {(financials.get('profit_margin') or 0) * 100:.1f}%
+""")
         
-        filing_context = ""
-        if supplier_10k:
-            filing_context = f"10-K filed: {supplier_10k['filing_date']}\n\nKey excerpts:\n{supplier_10k['key_text'][:15000]}"
+        context = "\n".join(context_parts) if context_parts else "Limited data available"
         
-        prompt = f"""Analyze {supplier_name}'s impact on {target_company}.
+        prompt = f"""Analyze how {supplier['name']} ({supplier.get('ticker', 'Unknown')}) could impact {target_company}.
 
-SUPPLIER CONTEXT:
-- What they supply: {supplies}
-- Importance: {supplier.get('importance', 'Unknown')}
-- Exposure: {supplier.get('financial_exposure', 'Not disclosed')}
+Supplier provides: {supplier.get('supplies', 'Unknown')}
+Importance: {supplier.get('importance', 'Unknown')}
 
-FINANCIALS:
-{financial_context if financial_context else "Limited data"}
+{context}
 
-10-K ANALYSIS:
-{filing_context if filing_context else "Not available"}
-
-Provide comprehensive analysis in this EXACT JSON format with NO other text:
+Return analysis as JSON:
 {{
   "quantitative": {{
-    "financial_scale": "Assessment text",
-    "capacity_assessment": "Assessment text",
-    "investment_outlook": "Assessment text",
-    "mutual_dependency": "Assessment text"
+    "revenue_stability": "Assessment",
+    "capacity_assessment": "Assessment",
+    "investment_outlook": "Assessment",
+    "mutual_dependency": "Assessment"
   }},
   "qualitative": {{
-    "strategic_importance": "Assessment text",
-    "relationship_strength": "Assessment text",
+    "strategic_importance": "Assessment",
+    "relationship_strength": "Assessment",
     "risk_level": "High|Medium|Low",
-    "alternative_availability": "Assessment text"
+    "alternative_availability": "Assessment"
   }},
-  "opportunities": ["Opportunity 1", "Opportunity 2"],
+  "opportunities": ["Opp 1", "Opp 2"],
   "challenges": ["Challenge 1", "Challenge 2"],
   "risks": ["Risk 1", "Risk 2"],
   "reliability_score": 7.5,
@@ -324,6 +368,9 @@ Provide comprehensive analysis in this EXACT JSON format with NO other text:
 Return ONLY valid JSON."""
         
         try:
+            # Rate limit protection
+            self._rate_limit_delay(2.0)
+            
             message = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=2500,
@@ -341,7 +388,6 @@ Return ONLY valid JSON."""
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0]
             
-            # Extract JSON
             start = response.find('{')
             end = response.rfind('}')
             if start != -1 and end != -1:
@@ -354,6 +400,11 @@ Return ONLY valid JSON."""
                 **result
             }
             
+        except anthropic.RateLimitError as e:
+            return {
+                'success': False,
+                'error': f"Rate limit: {str(e)}"
+            }
         except Exception as e:
             return {
                 'success': False,
@@ -406,11 +457,13 @@ Return ONLY valid JSON."""
         return max(-2.0, min(2.0, score))
     
     def analyze(self, ticker: str, verbose: bool = True) -> Dict:
-        """Complete enhanced supplier analysis"""
+        """Complete enhanced supplier analysis with caching"""
         
         if verbose:
             print(f"\n{'='*80}")
             print(f"ENHANCED SUPPLIER ANALYSIS: {ticker.upper()}")
+            if self.use_cache:
+                print("Caching: ENABLED (7-day TTL for supplier data)")
             print(f"{'='*80}\n")
             print("Step 1: Searching web to identify suppliers...")
         
@@ -421,7 +474,7 @@ Return ONLY valid JSON."""
         except:
             company_name = ticker.upper()
         
-        # Step 1: Web search for suppliers
+        # Step 1: Web search for suppliers (cached)
         supplier_search = self.identify_suppliers_with_web_search(ticker, company_name)
         
         if not supplier_search.get('success'):
@@ -430,6 +483,9 @@ Return ONLY valid JSON."""
                 'error': supplier_search.get('error', 'Failed to identify suppliers'),
                 'ticker': ticker.upper()
             }
+        
+        if verbose and supplier_search.get('_from_cache'):
+            print("✅ Using cached supplier list (fresh)")
         
         suppliers = supplier_search.get('suppliers', [])
         
@@ -456,15 +512,15 @@ Return ONLY valid JSON."""
             if supplier.get('ticker') != 'PRIVATE' and supplier.get('ticker'):
                 ticker_sym = supplier['ticker']
                 
-                # Get 10-K
+                # Get 10-K (cached)
                 supplier_10k = self.get_supplier_10k(ticker_sym)
                 supplier_result['has_10k'] = bool(supplier_10k)
                 
-                # Get financials
+                # Get financials (cached)
                 financials = self.get_supplier_financials(ticker_sym)
                 supplier_result['financials'] = financials
                 
-                # Analyze impact
+                # Analyze impact (with rate limiting)
                 impact = self.analyze_supplier_impact(
                     supplier, supplier_10k, financials, company_name
                 )
@@ -495,6 +551,7 @@ Return ONLY valid JSON."""
         scores = [s.get('score', 0) for s in analyzed_suppliers]
         avg_score = sum(scores) / len(scores) if scores else 0
         composite = round(5.5 + (avg_score * 2.25), 1)
+        composite = max(1, min(10, composite))
         
         if composite >= 7.0:
             signal = "LOW RISK"
@@ -505,12 +562,14 @@ Return ONLY valid JSON."""
         else:
             signal = "HIGH RISK"
         
+        estimated_cost = self.total_tokens * 0.003 / 1000
+        
         if verbose:
             print(f"\n{'='*80}")
             print(f"RISK SCORE: {composite}/10")
             print(f"RISK LEVEL: {signal}")
             print(f"{'='*80}")
-            print(f"Cost: ${self.total_tokens * 0.003 / 1000:.3f}")
+            print(f"Cost: ${estimated_cost:.3f}")
             print(f"{'='*80}\n")
         
         return {
@@ -525,5 +584,6 @@ Return ONLY valid JSON."""
             'suppliers': analyzed_suppliers,
             'search_quality': supplier_search.get('search_quality', 'Medium'),
             'tokens_used': self.total_tokens,
-            'estimated_cost': self.total_tokens * 0.003 / 1000
+            'estimated_cost': estimated_cost,
+            '_from_cache': supplier_search.get('_from_cache', False)
         }
