@@ -1,14 +1,12 @@
 """
-Company Performance Analyzer - Module 1 (FIXED VERSION)
-Properly handles caching by storing extracted metrics, not Filing objects
+Company Performance Analyzer - Module 1 (ROBUST VERSION)
+Uses yfinance as PRIMARY data source (more reliable than parsing SEC filings)
+Falls back gracefully when data is unavailable
 """
 
-from edgar import Company, set_identity
 import pandas as pd
 from datetime import datetime, timedelta
 import yfinance as yf
-import re
-import time
 from typing import Dict, Optional
 
 # Import cache manager
@@ -19,15 +17,20 @@ except ImportError:
     CACHE_AVAILABLE = False
     print("⚠️ cache_manager not found - running without caching")
 
-# Set Edgar identity (required by SEC)
-set_identity("Paul Balasubramanian factorimpactai@gmail.com")
+# Optional: Edgar for filing dates only
+try:
+    from edgar import Company, set_identity
+    set_identity("Paul Balasubramanian factorimpactai@gmail.com")
+    EDGAR_AVAILABLE = True
+except ImportError:
+    EDGAR_AVAILABLE = False
 
 
 class CompanyPerformanceAnalyzer:
     """
-    Analyzes company performance from SEC filings with intelligent caching
+    Analyzes company performance using yfinance (primary) + SEC filings (backup)
     
-    FIXED: Now caches extracted metrics (not Filing objects)
+    Much more reliable than parsing SEC XBRL directly
     """
     
     def __init__(self, use_cache: bool = True):
@@ -45,166 +48,165 @@ class CompanyPerformanceAnalyzer:
         if self.use_cache:
             self.cache = DataCacheManager()
     
-    def extract_financial_metrics(self, filing) -> Dict:
-        """Extract key financial metrics from filing"""
-        try:
-            facts = filing.financials
-            
-            # Revenue
-            revenue = facts.get('Revenues', facts.get('RevenueFromContractWithCustomerExcludingAssessedTax', 0))
-            if isinstance(revenue, pd.Series):
-                revenue = revenue.iloc[0] if len(revenue) > 0 else 0
-            
-            # Net Income
-            net_income = facts.get('NetIncomeLoss', 0)
-            if isinstance(net_income, pd.Series):
-                net_income = net_income.iloc[0] if len(net_income) > 0 else 0
-            
-            # Operating Income
-            operating_income = facts.get('OperatingIncomeLoss', 0)
-            if isinstance(operating_income, pd.Series):
-                operating_income = operating_income.iloc[0] if len(operating_income) > 0 else 0
-            
-            # Assets/Liabilities/Cash/Debt for financial health
-            assets = facts.get('Assets', 0)
-            liabilities = facts.get('Liabilities', 0)
-            cash = facts.get('CashAndCashEquivalentsAtCarryingValue', 0)
-            debt = facts.get('LongTermDebt', 0)
-            
-            if isinstance(assets, pd.Series):
-                assets = assets.iloc[0] if len(assets) > 0 else 0
-            if isinstance(liabilities, pd.Series):
-                liabilities = liabilities.iloc[0] if len(liabilities) > 0 else 0
-            if isinstance(cash, pd.Series):
-                cash = cash.iloc[0] if len(cash) > 0 else 0
-            if isinstance(debt, pd.Series):
-                debt = debt.iloc[0] if len(debt) > 0 else 0
-            
-            # Calculate margins
-            operating_margin = 0
-            net_margin = 0
-            
-            if revenue and revenue > 0:
-                if operating_income:
-                    operating_margin = (operating_income / revenue) * 100
-                if net_income:
-                    net_margin = (net_income / revenue) * 100
-            
-            # Calculate ratios
-            debt_to_assets = (debt / assets * 100) if assets else 0
-            cash_to_debt = (cash / debt) if debt else 999
-            
-            return {
-                'revenue': float(revenue) if revenue else 0,
-                'net_income': float(net_income) if net_income else 0,
-                'operating_income': float(operating_income) if operating_income else 0,
-                'operating_margin': float(operating_margin) if operating_margin else 0,
-                'net_margin': float(net_margin) if net_margin else 0,
-                'assets': float(assets) if assets else 0,
-                'liabilities': float(liabilities) if liabilities else 0,
-                'cash': float(cash) if cash else 0,
-                'debt': float(debt) if debt else 0,
-                'debt_to_assets': float(debt_to_assets),
-                'cash_to_debt': float(cash_to_debt) if cash_to_debt < 999 else 999
-            }
-            
-        except Exception as e:
-            return {
-                'revenue': 0,
-                'net_income': 0,
-                'operating_income': 0,
-                'operating_margin': 0,
-                'net_margin': 0,
-                'assets': 0,
-                'liabilities': 0,
-                'cash': 0,
-                'debt': 0,
-                'debt_to_assets': 0,
-                'cash_to_debt': 0,
-                'error': str(e)
-            }
-    
-    def get_company_data(self, ticker: str) -> Dict:
+    def get_financial_data(self, ticker: str) -> Dict:
         """
-        Fetch company data with proper caching
-        FIXED: Caches extracted metrics, not Filing objects
+        Get financial data from yfinance (primary source)
+        Much more reliable than parsing SEC filings
         """
         
         # Check cache first
         if self.use_cache:
-            cached = self.cache.get('financial_statements', ticker=ticker)
-            if cached and cached.get('current_metrics'):
+            cached = self.cache.get('company_financials', ticker=ticker)
+            if cached and cached.get('revenue'):
                 cached['_from_cache'] = True
                 return cached
         
-        # Cache miss - fetch fresh data from SEC
         try:
-            company = Company(ticker)
+            stock = yf.Ticker(ticker)
+            info = stock.info
             
-            # Get most recent filings
-            tenk_filings = company.get_filings(form="10-K")
-            tenq_filings = company.get_filings(form="10-Q")
+            # Get quarterly financials
+            quarterly_financials = stock.quarterly_financials
+            quarterly_income = stock.quarterly_income_stmt
+            balance_sheet = stock.quarterly_balance_sheet
             
-            # Get latest of each type
-            latest_10k = None
-            latest_10qs = []
-            
-            try:
-                for f in tenk_filings:
-                    latest_10k = f
-                    break
-            except:
-                pass
-            
-            try:
-                count = 0
-                for f in tenq_filings:
-                    latest_10qs.append(f)
-                    count += 1
-                    if count >= 4:
-                        break
-            except:
-                pass
-            
-            if not latest_10k and not latest_10qs:
-                return {
-                    'success': False,
-                    'error': 'No recent filings available',
-                    'ticker': ticker.upper()
-                }
-            
-            # Use most recent filing for current metrics
-            latest_filing = latest_10qs[0] if latest_10qs else latest_10k
-            current_metrics = self.extract_financial_metrics(latest_filing)
-            
-            # Get prior period for comparison
-            prior_filing = latest_10qs[3] if len(latest_10qs) > 3 else latest_10k
-            prior_metrics = self.extract_financial_metrics(prior_filing) if prior_filing else None
-            
-            # Get filing date
-            filing_date = 'Unknown'
-            try:
-                if hasattr(latest_filing, 'filing_date'):
-                    filing_date = latest_filing.filing_date.strftime('%Y-%m-%d')
-            except:
-                pass
-            
+            # Extract key metrics
             result = {
                 'success': True,
-                'company_name': company.name,
                 'ticker': ticker.upper(),
-                'cik': company.cik,
-                'current_metrics': current_metrics,
-                'prior_metrics': prior_metrics,
-                'filing_date': filing_date,
-                'has_10k': latest_10k is not None,
-                'has_10q': len(latest_10qs) > 0,
+                'company_name': info.get('longName', info.get('shortName', ticker)),
                 '_from_cache': False
             }
             
-            # Cache the extracted metrics (NOT the Filing objects)
-            if self.use_cache:
-                self.cache.set('financial_statements', result, ticker=ticker, cost=0.01)
+            # === REVENUE & GROWTH ===
+            revenue = None
+            revenue_prev = None
+            revenue_growth = None
+            
+            # Try quarterly income statement first
+            if quarterly_income is not None and not quarterly_income.empty:
+                try:
+                    if 'Total Revenue' in quarterly_income.index:
+                        revenue = quarterly_income.loc['Total Revenue'].iloc[0]
+                        if len(quarterly_income.columns) > 4:
+                            revenue_prev = quarterly_income.loc['Total Revenue'].iloc[4]  # YoY
+                        elif len(quarterly_income.columns) > 1:
+                            revenue_prev = quarterly_income.loc['Total Revenue'].iloc[-1]
+                except:
+                    pass
+            
+            # Fallback to info
+            if revenue is None:
+                revenue = info.get('totalRevenue', info.get('revenue', 0))
+            
+            # Calculate growth
+            if revenue and revenue_prev and revenue_prev != 0:
+                revenue_growth = ((revenue - revenue_prev) / abs(revenue_prev)) * 100
+            else:
+                revenue_growth = info.get('revenueGrowth', 0)
+                if revenue_growth:
+                    revenue_growth = revenue_growth * 100  # Convert to percentage
+            
+            result['revenue'] = float(revenue) if revenue else 0
+            result['revenue_prev'] = float(revenue_prev) if revenue_prev else 0
+            result['revenue_growth'] = float(revenue_growth) if revenue_growth else 0
+            
+            # === PROFITABILITY ===
+            net_income = None
+            operating_income = None
+            
+            if quarterly_income is not None and not quarterly_income.empty:
+                try:
+                    if 'Net Income' in quarterly_income.index:
+                        net_income = quarterly_income.loc['Net Income'].iloc[0]
+                    if 'Operating Income' in quarterly_income.index:
+                        operating_income = quarterly_income.loc['Operating Income'].iloc[0]
+                except:
+                    pass
+            
+            if net_income is None:
+                net_income = info.get('netIncomeToCommon', info.get('netIncome', 0))
+            
+            result['net_income'] = float(net_income) if net_income else 0
+            result['operating_income'] = float(operating_income) if operating_income else 0
+            
+            # === MARGINS ===
+            gross_margin = info.get('grossMargins', 0)
+            operating_margin = info.get('operatingMargins', 0)
+            profit_margin = info.get('profitMargins', 0)
+            
+            # Convert to percentages if they're decimals
+            if gross_margin and gross_margin < 1:
+                gross_margin = gross_margin * 100
+            if operating_margin and operating_margin < 1:
+                operating_margin = operating_margin * 100
+            if profit_margin and profit_margin < 1:
+                profit_margin = profit_margin * 100
+            
+            result['gross_margin'] = float(gross_margin) if gross_margin else 0
+            result['operating_margin'] = float(operating_margin) if operating_margin else 0
+            result['net_margin'] = float(profit_margin) if profit_margin else 0
+            
+            # === FINANCIAL HEALTH ===
+            total_debt = info.get('totalDebt', 0)
+            total_cash = info.get('totalCash', 0)
+            total_assets = None
+            
+            if balance_sheet is not None and not balance_sheet.empty:
+                try:
+                    if 'Total Assets' in balance_sheet.index:
+                        total_assets = balance_sheet.loc['Total Assets'].iloc[0]
+                except:
+                    pass
+            
+            if total_assets is None:
+                total_assets = info.get('totalAssets', 0)
+            
+            debt_to_equity = info.get('debtToEquity', 0)
+            current_ratio = info.get('currentRatio', 0)
+            
+            result['total_debt'] = float(total_debt) if total_debt else 0
+            result['total_cash'] = float(total_cash) if total_cash else 0
+            result['total_assets'] = float(total_assets) if total_assets else 0
+            result['debt_to_equity'] = float(debt_to_equity) if debt_to_equity else 0
+            result['current_ratio'] = float(current_ratio) if current_ratio else 0
+            
+            # Calculate debt to assets
+            if total_assets and total_assets > 0:
+                result['debt_to_assets'] = (total_debt / total_assets) * 100 if total_debt else 0
+            else:
+                result['debt_to_assets'] = 0
+            
+            # Cash coverage
+            if total_debt and total_debt > 0:
+                result['cash_to_debt'] = total_cash / total_debt if total_cash else 0
+            else:
+                result['cash_to_debt'] = 999  # No debt = infinite coverage
+            
+            # === STOCK DATA ===
+            result['price'] = info.get('currentPrice', info.get('regularMarketPrice', 0))
+            result['market_cap'] = info.get('marketCap', 0)
+            result['pe_ratio'] = info.get('trailingPE', 0)
+            result['forward_pe'] = info.get('forwardPE', 0)
+            result['beta'] = info.get('beta', 1.0)
+            
+            # === DATA DATE ===
+            result['data_date'] = datetime.now().strftime('%Y-%m-%d')
+            
+            # Try to get latest filing date from Edgar
+            if EDGAR_AVAILABLE:
+                try:
+                    company = Company(ticker)
+                    filings = company.get_filings(form="10-Q")
+                    for f in filings:
+                        result['data_date'] = str(f.filing_date)
+                        break
+                except:
+                    pass
+            
+            # Cache the result
+            if self.use_cache and result.get('revenue', 0) > 0:
+                self.cache.set('company_financials', result, ticker=ticker, cost=0.01)
             
             return result
             
@@ -215,64 +217,29 @@ class CompanyPerformanceAnalyzer:
                 'ticker': ticker.upper()
             }
     
-    def get_stock_price(self, ticker: str) -> Dict:
-        """Get current stock price with caching"""
-        
-        if self.use_cache:
-            cached = self.cache.get('stock_fundamentals', ticker=ticker)
-            if cached:
-                cached['_from_cache'] = True
-                return cached
-        
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            result = {
-                'success': True,
-                'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
-                'market_cap': info.get('marketCap', 0),
-                'pe_ratio': info.get('trailingPE', 0),
-                'forward_pe': info.get('forwardPE', 0),
-                '_from_cache': False
-            }
-            
-            if self.use_cache:
-                self.cache.set('stock_fundamentals', result, ticker=ticker, cost=0.001)
-            
-            return result
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def calculate_revenue_growth(self, current_revenue: float, prior_revenue: float) -> Dict:
+    def calculate_revenue_growth_score(self, growth_rate: float) -> Dict:
         """Calculate revenue growth score"""
-        if not prior_revenue or prior_revenue == 0:
-            return {'score': 0, 'growth_rate': 0, 'reasoning': 'No prior revenue data'}
+        if growth_rate is None:
+            return {'score': 0, 'growth_rate': 0, 'reasoning': 'No growth data'}
         
-        growth_rate = ((current_revenue - prior_revenue) / prior_revenue) * 100
-        
-        if growth_rate >= 20:
+        if growth_rate >= 25:
             score = 2.0
-            reasoning = f"Exceptional growth: {growth_rate:.1f}% YoY"
-        elif growth_rate >= 10:
+            reasoning = f"Exceptional growth: {growth_rate:.1f}%"
+        elif growth_rate >= 15:
             score = 1.5
-            reasoning = f"Strong growth: {growth_rate:.1f}% YoY"
-        elif growth_rate >= 5:
+            reasoning = f"Strong growth: {growth_rate:.1f}%"
+        elif growth_rate >= 8:
             score = 1.0
-            reasoning = f"Solid growth: {growth_rate:.1f}% YoY"
+            reasoning = f"Solid growth: {growth_rate:.1f}%"
         elif growth_rate >= 0:
             score = 0.5
-            reasoning = f"Modest growth: {growth_rate:.1f}% YoY"
+            reasoning = f"Modest growth: {growth_rate:.1f}%"
         elif growth_rate >= -5:
             score = -0.5
-            reasoning = f"Slight decline: {growth_rate:.1f}% YoY"
+            reasoning = f"Slight decline: {growth_rate:.1f}%"
         else:
             score = -1.5
-            reasoning = f"Significant decline: {growth_rate:.1f}% YoY"
+            reasoning = f"Significant decline: {growth_rate:.1f}%"
         
         return {
             'score': score,
@@ -280,29 +247,32 @@ class CompanyPerformanceAnalyzer:
             'reasoning': reasoning
         }
     
-    def assess_margins(self, metrics: Dict) -> Dict:
+    def assess_margins(self, data: Dict) -> Dict:
         """Assess profitability margins"""
-        operating_margin = metrics.get('operating_margin', 0)
-        net_margin = metrics.get('net_margin', 0)
+        operating_margin = data.get('operating_margin', 0)
+        net_margin = data.get('net_margin', 0)
         
-        if operating_margin >= 30:
+        # Use operating margin as primary metric
+        margin = operating_margin if operating_margin else net_margin
+        
+        if margin >= 30:
             score = 2.0
-            reasoning = f"Exceptional margins: {operating_margin:.1f}% operating"
-        elif operating_margin >= 20:
+            reasoning = f"Exceptional margins: {margin:.1f}%"
+        elif margin >= 20:
             score = 1.5
-            reasoning = f"Strong margins: {operating_margin:.1f}% operating"
-        elif operating_margin >= 10:
+            reasoning = f"Strong margins: {margin:.1f}%"
+        elif margin >= 12:
             score = 1.0
-            reasoning = f"Healthy margins: {operating_margin:.1f}% operating"
-        elif operating_margin >= 5:
+            reasoning = f"Healthy margins: {margin:.1f}%"
+        elif margin >= 5:
             score = 0.5
-            reasoning = f"Modest margins: {operating_margin:.1f}% operating"
-        elif operating_margin >= 0:
+            reasoning = f"Modest margins: {margin:.1f}%"
+        elif margin >= 0:
             score = 0
-            reasoning = f"Breakeven: {operating_margin:.1f}% operating"
+            reasoning = f"Breakeven: {margin:.1f}%"
         else:
             score = -1.5
-            reasoning = f"Unprofitable: {operating_margin:.1f}% operating"
+            reasoning = f"Unprofitable: {margin:.1f}%"
         
         return {
             'score': score,
@@ -311,88 +281,107 @@ class CompanyPerformanceAnalyzer:
             'reasoning': reasoning
         }
     
-    def assess_financial_health(self, metrics: Dict) -> Dict:
-        """Assess financial health from cached metrics"""
-        debt_to_assets = metrics.get('debt_to_assets', 0)
-        cash_to_debt = metrics.get('cash_to_debt', 0)
-        cash = metrics.get('cash', 0)
-        debt = metrics.get('debt', 0)
+    def assess_financial_health(self, data: Dict) -> Dict:
+        """Assess financial health"""
+        debt_to_assets = data.get('debt_to_assets', 0)
+        cash_to_debt = data.get('cash_to_debt', 0)
+        current_ratio = data.get('current_ratio', 0)
+        debt_to_equity = data.get('debt_to_equity', 0)
         
-        if debt_to_assets < 20 and cash > debt:
-            score = 2.0
-            reasoning = f"Excellent: {debt_to_assets:.1f}% debt/assets, {cash_to_debt:.1f}x cash coverage"
+        # Score based on multiple factors
+        score = 0.0
+        reasons = []
+        
+        # Debt level
+        if debt_to_assets < 20:
+            score += 1.0
+            reasons.append(f"Low debt ({debt_to_assets:.0f}% of assets)")
         elif debt_to_assets < 40:
-            score = 1.0
-            reasoning = f"Healthy: {debt_to_assets:.1f}% debt/assets"
+            score += 0.5
+            reasons.append(f"Moderate debt ({debt_to_assets:.0f}% of assets)")
         elif debt_to_assets < 60:
-            score = 0
-            reasoning = f"Moderate: {debt_to_assets:.1f}% debt/assets"
+            reasons.append(f"High debt ({debt_to_assets:.0f}% of assets)")
         else:
-            score = -1.0
-            reasoning = f"Concerning: {debt_to_assets:.1f}% debt/assets"
+            score -= 1.0
+            reasons.append(f"Very high debt ({debt_to_assets:.0f}% of assets)")
+        
+        # Cash position
+        if cash_to_debt > 2:
+            score += 1.0
+            reasons.append("Strong cash position")
+        elif cash_to_debt > 1:
+            score += 0.5
+            reasons.append("Adequate cash")
+        elif cash_to_debt > 0.5:
+            pass  # Neutral
+        else:
+            score -= 0.5
+            reasons.append("Low cash coverage")
+        
+        # Cap score
+        score = max(-2.0, min(2.0, score))
         
         return {
             'score': score,
             'debt_to_assets': round(debt_to_assets, 2),
             'cash_to_debt': round(cash_to_debt, 2) if cash_to_debt < 999 else 999,
-            'reasoning': reasoning
+            'current_ratio': round(current_ratio, 2),
+            'reasoning': "; ".join(reasons) if reasons else "Neutral financial health"
         }
     
     def analyze(self, ticker: str, verbose: bool = True) -> Dict:
-        """Complete company performance analysis with caching"""
+        """Complete company performance analysis"""
         
         if verbose:
             print(f"\n{'='*80}")
             print(f"COMPANY PERFORMANCE ANALYSIS: {ticker.upper()}")
             if self.use_cache:
-                print(f"Caching: ENABLED (90-day TTL for filings)")
+                print(f"Caching: ENABLED")
             print(f"{'='*80}\n")
         
-        # Get company data (with caching)
-        company_data = self.get_company_data(ticker)
+        # Get financial data (primarily from yfinance)
+        data = self.get_financial_data(ticker)
         
-        if not company_data.get('success'):
+        if not data.get('success', False):
             return {
                 'success': False,
-                'error': company_data.get('error', 'Failed to fetch company data')
+                'error': data.get('error', 'Failed to fetch financial data')
             }
         
-        if verbose and company_data.get('_from_cache'):
-            print("✅ Using cached financial statements (fresh)")
+        if verbose and data.get('_from_cache'):
+            print("✅ Using cached financial data")
         
-        # Get stock price (with caching)
-        price_data = self.get_stock_price(ticker)
-        
-        if verbose and price_data.get('_from_cache'):
-            print("✅ Using cached stock price (fresh)")
-        
-        # Use cached metrics
-        current_metrics = company_data.get('current_metrics', {})
-        prior_metrics = company_data.get('prior_metrics', {})
-        
-        if not current_metrics or current_metrics.get('revenue', 0) == 0:
+        # Check if we have minimum required data
+        if data.get('revenue', 0) == 0 and data.get('market_cap', 0) == 0:
             return {
                 'success': False,
-                'error': 'No financial data available'
+                'error': 'Insufficient financial data available for this ticker'
             }
         
-        # Calculate scores from cached metrics
-        revenue_analysis = self.calculate_revenue_growth(
-            current_metrics.get('revenue', 0),
-            prior_metrics.get('revenue', 0) if prior_metrics else 0
-        )
+        # Calculate scores
+        revenue_analysis = self.calculate_revenue_growth_score(data.get('revenue_growth', 0))
+        margin_analysis = self.assess_margins(data)
+        health_analysis = self.assess_financial_health(data)
         
-        margin_analysis = self.assess_margins(current_metrics)
-        health_analysis = self.assess_financial_health(current_metrics)
+        # Profitability score
+        net_income = data.get('net_income', 0)
+        if net_income > 0:
+            profitability = {'score': 1.0, 'reasoning': 'Profitable company'}
+        elif net_income == 0:
+            profitability = {'score': 0, 'reasoning': 'Breakeven'}
+        else:
+            profitability = {'score': -1.0, 'reasoning': 'Net loss'}
+        
+        # Guidance (placeholder - would need earnings call analysis)
+        guidance = {'score': 0.5, 'reasoning': 'Assumed stable outlook'}
         
         # Weighted composite
         factors = {
             'revenue_growth': revenue_analysis,
             'margins': margin_analysis,
             'financial_health': health_analysis,
-            'profitability': {'score': 1.0 if current_metrics.get('net_income', 0) > 0 else -0.5, 
-                            'reasoning': 'Positive net income' if current_metrics.get('net_income', 0) > 0 else 'Net loss'},
-            'guidance': {'score': 0.5, 'reasoning': 'Stable outlook'}
+            'profitability': profitability,
+            'guidance': guidance
         }
         
         composite_raw = sum(
@@ -402,7 +391,7 @@ class CompanyPerformanceAnalyzer:
         
         # Convert to 1-10 scale
         composite = round(5.5 + (composite_raw * 2.25), 1)
-        composite = max(1, min(10, composite))  # Clamp to 1-10
+        composite = max(1, min(10, composite))
         
         # Determine signal
         if composite >= 8.5:
@@ -418,25 +407,33 @@ class CompanyPerformanceAnalyzer:
             print(f"\n{'='*80}")
             print(f"COMPANY SCORE: {composite}/10")
             print(f"SIGNAL: {signal}")
-            print(f"{'='*80}")
-            cache_hits = (1 if company_data.get('_from_cache') else 0) + (1 if price_data.get('_from_cache') else 0)
-            print(f"Cache Status: {cache_hits}/2 from cache")
             print(f"{'='*80}\n")
         
         return {
             'success': True,
             'ticker': ticker.upper(),
-            'company_name': company_data.get('company_name', ticker),
+            'company_name': data.get('company_name', ticker),
             'score': composite,
             'signal': signal,
             'factors': factors,
-            'current_metrics': current_metrics,
-            'prior_metrics': prior_metrics,
-            'price_data': price_data,
-            'data_date': company_data.get('filing_date', 'Unknown'),
+            'current_metrics': {
+                'revenue': data.get('revenue', 0),
+                'revenue_growth': data.get('revenue_growth', 0),
+                'net_income': data.get('net_income', 0),
+                'operating_margin': data.get('operating_margin', 0),
+                'net_margin': data.get('net_margin', 0),
+                'debt_to_assets': data.get('debt_to_assets', 0),
+                'cash_to_debt': data.get('cash_to_debt', 0)
+            },
+            'price_data': {
+                'price': data.get('price', 0),
+                'market_cap': data.get('market_cap', 0),
+                'pe_ratio': data.get('pe_ratio', 0),
+                'beta': data.get('beta', 1.0)
+            },
+            'data_date': data.get('data_date', 'Unknown'),
             '_cache_info': {
-                'filings_cached': company_data.get('_from_cache', False),
-                'price_cached': price_data.get('_from_cache', False)
+                'from_cache': data.get('_from_cache', False)
             },
             'cost': 0.02
         }
@@ -448,5 +445,8 @@ if __name__ == "__main__":
     
     if result['success']:
         print(f"✅ Analysis complete: {result['score']}/10 - {result['signal']}")
+        print(f"Revenue: ${result['current_metrics']['revenue']:,.0f}")
+        print(f"Revenue Growth: {result['current_metrics']['revenue_growth']:.1f}%")
+        print(f"Operating Margin: {result['current_metrics']['operating_margin']:.1f}%")
     else:
         print(f"❌ Error: {result.get('error')}")
