@@ -1,6 +1,6 @@
 """
-Customer Analysis Module - Module 3
-Identifies and analyzes customer relationships for demand-side risk assessment
+Customer Analysis Module - WITH CACHING & RATE LIMIT HANDLING
+Identifies and analyzes customer relationships with intelligent caching
 """
 
 from edgar import Company, set_identity
@@ -11,15 +11,24 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import json
 import re
+import time
 
-# CHANGE THIS TO YOUR EMAIL
+# Import cache manager
+try:
+    from cache_manager import DataCacheManager
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    print("⚠️ cache_manager not found - running without caching")
+
+# Set Edgar identity
 set_identity("Paul Balasubramanian pb2963@columbia.edu")
 
 
 class CustomerAnalyzer:
-    """Analyzes customer relationships and demand-side risks"""
+    """Analyzes customer relationships with caching and rate limit handling"""
     
-    def __init__(self, anthropic_api_key: Optional[str] = None):
+    def __init__(self, anthropic_api_key: Optional[str] = None, use_cache: bool = True):
         """Initialize with Anthropic API key"""
         self.api_key = anthropic_api_key or os.environ.get('ANTHROPIC_API_KEY')
         if not self.api_key:
@@ -28,9 +37,24 @@ class CustomerAnalyzer:
         self.client = anthropic.Anthropic(api_key=self.api_key)
         self.current_date = datetime.now()
         self.total_tokens = 0
+        self.use_cache = use_cache and CACHE_AVAILABLE
+        
+        if self.use_cache:
+            self.cache = DataCacheManager()
+    
+    def _rate_limit_delay(self, seconds: float = 2.0):
+        """Add delay between API calls to avoid rate limits"""
+        time.sleep(seconds)
     
     def identify_customers_with_web_search(self, ticker: str, company_name: str) -> Dict:
-        """Use Claude with web search to identify top 5 customers"""
+        """Use Claude with web search to identify top 5 customers - WITH CACHING"""
+        
+        # Check cache first (customers don't change often - cache for 7 days)
+        if self.use_cache:
+            cached = self.cache.get('customer_list', ticker=ticker)
+            if cached:
+                cached['_from_cache'] = True
+                return cached
         
         prompt = f"""Search the web to identify the TOP 5 most important customers for {company_name} ({ticker}).
 
@@ -80,6 +104,9 @@ Return your findings in this EXACT JSON format with NO other text:
 CRITICAL: Return ONLY valid JSON. No explanatory text."""
         
         try:
+            # Rate limit protection
+            self._rate_limit_delay(1.0)
+            
             # Call Claude with web search
             message = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
@@ -145,14 +172,27 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
             if not isinstance(customers, list):
                 customers = []
             
-            return {
+            final_result = {
                 'success': True,
                 'customers': customers[:5],
                 'overall_concentration': result.get('overall_customer_concentration', 'Medium'),
                 'key_findings': result.get('key_findings', []),
-                'search_quality': result.get('search_quality', 'Medium')
+                'search_quality': result.get('search_quality', 'Medium'),
+                '_from_cache': False
             }
             
+            # Cache the result
+            if self.use_cache:
+                self.cache.set('customer_list', final_result, ticker=ticker, cost=0.05)
+            
+            return final_result
+            
+        except anthropic.RateLimitError as e:
+            return {
+                'success': False,
+                'error': f"Rate limit error: {str(e)}. Please wait 60 seconds and try again.",
+                'customers': []
+            }
         except Exception as e:
             return {
                 'success': False,
@@ -161,7 +201,13 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
             }
     
     def get_customer_financials(self, ticker: str) -> Optional[Dict]:
-        """Get financial metrics and CapEx trends for customer"""
+        """Get financial metrics and CapEx trends for customer - WITH CACHING"""
+        
+        if self.use_cache:
+            cached = self.cache.get('customer_financials', ticker=ticker)
+            if cached:
+                return cached
+        
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -200,7 +246,7 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
                     if capex and capex_prev:
                         capex_growth = ((capex - capex_prev) / capex_prev) * 100
             
-            return {
+            result = {
                 'ticker': ticker,
                 'company_name': info.get('longName', ticker),
                 'market_cap': info.get('marketCap'),
@@ -210,14 +256,26 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
                 'capex_growth': capex_growth,
                 'profit_margin': info.get('profitMargins'),
                 'free_cash_flow': info.get('freeCashflow'),
-                'latest_quarter': latest_quarter
+                'latest_quarter': str(latest_quarter)
             }
+            
+            # Cache the result
+            if self.use_cache:
+                self.cache.set('customer_financials', result, ticker=ticker, cost=0.001)
+            
+            return result
             
         except Exception as e:
             return None
     
     def get_customer_10k(self, ticker: str) -> Optional[Dict]:
-        """Fetch customer's latest 10-K for strategic insights"""
+        """Fetch customer's latest 10-K filing - WITH CACHING"""
+        
+        if self.use_cache:
+            cached = self.cache.get('sec_filing_text', ticker=ticker)
+            if cached:
+                return cached
+        
         try:
             company = Company(ticker)
             
@@ -233,7 +291,6 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
             if not filing:
                 return None
             
-            # Get text
             try:
                 full_text = filing.text()
             except:
@@ -246,113 +303,77 @@ CRITICAL: Return ONLY valid JSON. No explanatory text."""
             if not full_text or len(full_text) < 5000:
                 return None
             
-            # Extract MD&A for investment plans
+            # Extract key sections
             mda_pattern = r"(?:ITEM\s+7|Item\s+7).*?(?:ITEM\s+[78]|Item\s+[78]|$)"
             mda_match = re.search(mda_pattern, full_text, re.DOTALL | re.IGNORECASE)
+            mda_text = full_text[mda_match.start():mda_match.start()+25000] if mda_match else full_text[:25000]
             
-            mda_text = ""
-            if mda_match:
-                mda_text = full_text[mda_match.start():mda_match.start()+30000]
-            
-            return {
+            result = {
                 'success': True,
                 'company_name': company.name,
                 'filing_date': str(filing.filing_date),
-                'mda_text': mda_text[:30000]
+                'key_text': mda_text
             }
             
-        except Exception as e:
+            if self.use_cache:
+                self.cache.set('sec_filing_text', result, ticker=ticker, cost=0.01)
+            
+            return result
+            
+        except:
             return None
     
-    def analyze_customer_demand(self, customer: Dict, customer_10k: Dict,
-                                financials: Dict, target_company: str) -> Dict:
-        """Use Claude to analyze customer's demand outlook"""
+    def analyze_customer_demand(self, customer: Dict, customer_10k: Optional[Dict],
+                               financials: Optional[Dict], target_company: str) -> Dict:
+        """Analyze customer's demand outlook - WITH RATE LIMITING"""
         
-        customer_name = customer['name']
-        purchases = customer.get('purchases', 'Unknown')
+        context_parts = []
         
-        # Build financial context
-        financial_context = ""
+        if customer_10k and customer_10k.get('key_text'):
+            context_parts.append(f"10-K MD&A excerpts:\n{customer_10k['key_text'][:12000]}")
+        
         if financials:
-            mc = financials.get('market_cap', 0)
-            rev = financials.get('revenue', 0)
-            rev_growth = financials.get('revenue_growth', 0)
-            capex = financials.get('capex', 0)
-            capex_growth = financials.get('capex_growth', 0)
-            
-            if mc:
-                financial_context += f"Market Cap: ${mc/1e9:.1f}B\n"
-            if rev:
-                financial_context += f"Revenue (Q): ${rev/1e9:.1f}B\n"
-            if rev_growth:
-                financial_context += f"Revenue Growth: {rev_growth:+.1f}% QoQ\n"
-            if capex:
-                financial_context += f"CapEx (Q): ${capex/1e9:.2f}B\n"
-            if capex_growth:
-                financial_context += f"CapEx Growth: {capex_growth:+.1f}% QoQ\n"
+            context_parts.append(f"""
+Financial metrics:
+- Revenue: ${financials.get('revenue', 'N/A'):,.0f}
+- Revenue Growth: {financials.get('revenue_growth', 'N/A'):.1f}%
+- CapEx: ${financials.get('capex', 'N/A'):,.0f}
+- CapEx Growth: {financials.get('capex_growth', 'N/A'):.1f}%
+- Free Cash Flow: ${financials.get('free_cash_flow', 'N/A'):,.0f}
+""")
         
-        filing_context = ""
-        if customer_10k:
-            filing_context = f"10-K filed: {customer_10k['filing_date']}\n\nMD&A excerpt:\n{customer_10k['mda_text'][:15000]}"
+        context = "\n".join(context_parts) if context_parts else "Limited data available"
         
-        prompt = f"""Analyze {customer_name}'s demand outlook for {target_company}.
+        prompt = f"""Analyze the demand outlook for {customer['name']} ({customer.get('ticker', 'Unknown')}) 
+as a customer of {target_company}.
 
-CUSTOMER CONTEXT:
-- What they buy: {purchases}
-- Importance: {customer.get('importance', 'Unknown')}
-- Revenue contribution: {customer.get('revenue_contribution', 'Not disclosed')}
-- Recent developments: {customer.get('recent_developments', 'None')}
-- CapEx trend: {customer.get('capex_trend', 'Unknown')}
+They purchase: {customer.get('purchases', 'Unknown')}
+Revenue contribution: {customer.get('revenue_contribution', 'Unknown')}
+CapEx trend: {customer.get('capex_trend', 'Unknown')}
 
-FINANCIAL METRICS:
-{financial_context if financial_context else "Limited data"}
+{context}
 
-10-K ANALYSIS:
-{filing_context if filing_context else "Not available"}
-
-Provide analysis focusing on DEMAND-SIDE RISK:
-
-DEMAND ASSESSMENT:
-1. Growth Trajectory: Is this customer growing or declining?
-2. CapEx Momentum: Are they increasing investment in areas that use {target_company}'s products?
-3. Strategic Priority: How important is {target_company}'s product to their strategy?
-4. Budget Health: Can they afford to maintain/increase spending?
-
-RISK FACTORS:
-1. Concentration Risk: How dependent is {target_company} on this customer?
-2. Competition Risk: Are they exploring alternatives?
-3. Budget Cuts: Any risk of CapEx reduction?
-4. Contract Risk: Renewal timing, pricing pressure
-
-DEMAND OUTLOOK:
-- Increasing (strong growth expected)
-- Stable (maintain current levels)
-- Declining (reduction expected)
-
-Return JSON:
+Return analysis as JSON:
 {{
-  "demand_assessment": {{
-    "growth_trajectory": "Growing|Stable|Declining",
-    "capex_momentum": "Accelerating|Stable|Decelerating",
-    "strategic_priority": "Critical|High|Medium|Low",
-    "budget_health": "Strong|Adequate|Constrained"
-  }},
-  "risk_factors": {{
-    "concentration_risk": "High|Medium|Low",
-    "competition_risk": "High|Medium|Low",
-    "budget_risk": "High|Medium|Low",
-    "contract_risk": "High|Medium|Low"
-  }},
   "demand_outlook": "Increasing|Stable|Declining",
-  "opportunities": ["Opportunity 1", "Opportunity 2"],
-  "risks": ["Risk 1", "Risk 2"],
   "demand_score": 7.5,
+  "capex_analysis": {{
+    "trend": "Increasing|Stable|Decreasing",
+    "implication": "What this means for {target_company}"
+  }},
+  "growth_drivers": ["Driver 1", "Driver 2"],
+  "risk_factors": ["Risk 1", "Risk 2"],
+  "contract_outlook": "Assessment of ongoing relationship",
+  "strategic_importance": "High|Medium|Low",
   "summary": "2-3 sentence assessment"
 }}
 
 Return ONLY valid JSON."""
         
         try:
+            # Rate limit protection
+            self._rate_limit_delay(2.0)
+            
             message = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=2500,
@@ -382,6 +403,11 @@ Return ONLY valid JSON."""
                 **result
             }
             
+        except anthropic.RateLimitError as e:
+            return {
+                'success': False,
+                'error': f"Rate limit: {str(e)}"
+            }
         except Exception as e:
             return {
                 'success': False,
@@ -441,11 +467,13 @@ Return ONLY valid JSON."""
         return max(-2.0, min(2.0, score))
     
     def analyze(self, ticker: str, verbose: bool = True) -> Dict:
-        """Complete customer analysis"""
+        """Complete customer analysis with caching"""
         
         if verbose:
             print(f"\n{'='*80}")
             print(f"CUSTOMER ANALYSIS: {ticker.upper()}")
+            if self.use_cache:
+                print("Caching: ENABLED (7-day TTL for customer data)")
             print(f"{'='*80}\n")
             print("Step 1: Searching web to identify customers...")
         
@@ -456,7 +484,7 @@ Return ONLY valid JSON."""
         except:
             company_name = ticker.upper()
         
-        # Step 1: Web search for customers
+        # Step 1: Web search for customers (cached)
         customer_search = self.identify_customers_with_web_search(ticker, company_name)
         
         if not customer_search.get('success'):
@@ -465,6 +493,9 @@ Return ONLY valid JSON."""
                 'error': customer_search.get('error', 'Failed to identify customers'),
                 'ticker': ticker.upper()
             }
+        
+        if verbose and customer_search.get('_from_cache'):
+            print("✅ Using cached customer list (fresh)")
         
         customers = customer_search.get('customers', [])
         
@@ -491,15 +522,15 @@ Return ONLY valid JSON."""
             if customer.get('ticker') != 'PRIVATE' and customer.get('ticker'):
                 ticker_sym = customer['ticker']
                 
-                # Get financials (including CapEx)
+                # Get financials (cached)
                 financials = self.get_customer_financials(ticker_sym)
                 customer_result['financials'] = financials
                 
-                # Get 10-K
+                # Get 10-K (cached)
                 customer_10k = self.get_customer_10k(ticker_sym)
                 customer_result['has_10k'] = bool(customer_10k)
                 
-                # Analyze demand
+                # Analyze demand (with rate limiting)
                 demand = self.analyze_customer_demand(
                     customer, customer_10k, financials, company_name
                 )
@@ -530,6 +561,7 @@ Return ONLY valid JSON."""
         scores = [c.get('score', 0) for c in analyzed_customers]
         avg_score = sum(scores) / len(scores) if scores else 0
         composite = round(5.5 + (avg_score * 2.25), 1)
+        composite = max(1, min(10, composite))
         
         # Determine signal
         if composite >= 7.5:
@@ -543,12 +575,14 @@ Return ONLY valid JSON."""
         else:
             signal = "DECLINING DEMAND"
         
+        estimated_cost = self.total_tokens * 0.003 / 1000
+        
         if verbose:
             print(f"\n{'='*80}")
             print(f"CUSTOMER DEMAND SCORE: {composite}/10")
             print(f"DEMAND OUTLOOK: {signal}")
             print(f"{'='*80}")
-            print(f"Cost: ${self.total_tokens * 0.003 / 1000:.3f}")
+            print(f"Cost: ${estimated_cost:.3f}")
             print(f"{'='*80}\n")
         
         return {
@@ -563,5 +597,6 @@ Return ONLY valid JSON."""
             'customers': analyzed_customers,
             'search_quality': customer_search.get('search_quality', 'Medium'),
             'tokens_used': self.total_tokens,
-            'estimated_cost': self.total_tokens * 0.003 / 1000
+            'estimated_cost': estimated_cost,
+            '_from_cache': customer_search.get('_from_cache', False)
         }
