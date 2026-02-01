@@ -1,6 +1,6 @@
 """
-Company Performance Analyzer - Module 1 (Enhanced with Caching)
-Analyzes the LATEST 10-K and 10-Q filings with intelligent caching
+Company Performance Analyzer - Module 1 (FIXED VERSION)
+Properly handles caching by storing extracted metrics, not Filing objects
 """
 
 from edgar import Company, set_identity
@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import yfinance as yf
 import re
+import time
 from typing import Dict, Optional
 
 # Import cache manager
@@ -26,10 +27,7 @@ class CompanyPerformanceAnalyzer:
     """
     Analyzes company performance from SEC filings with intelligent caching
     
-    Caching Strategy:
-    - SEC filings: Cache for 90 days (quarterly data)
-    - Stock price: Cache for 24 hours (daily data)
-    - Financial metrics: Cache for 90 days
+    FIXED: Now caches extracted metrics (not Filing objects)
     """
     
     def __init__(self, use_cache: bool = True):
@@ -46,103 +44,6 @@ class CompanyPerformanceAnalyzer:
         
         if self.use_cache:
             self.cache = DataCacheManager()
-    
-    def get_company_filings(self, ticker: str) -> Dict:
-        """
-        Fetch MOST RECENT 10-K and 10-Q filings with caching
-        Cached for 90 days (quarterly refresh)
-        """
-        
-        if self.use_cache:
-            # Try cache first
-            cached = self.cache.get('financial_statements', ticker=ticker)
-            if cached:
-                cached['_from_cache'] = True
-                return cached
-        
-        # Cache miss - fetch fresh data
-        try:
-            company = Company(ticker)
-            
-            # Get most recent filings (within last 18 months)
-            cutoff_date = self.current_date - timedelta(days=545)  # 18 months
-            
-            tenk_filings = company.get_filings(form="10-K")
-            tenq_filings = company.get_filings(form="10-Q")
-            
-            # Get latest of each type
-            latest_10k = tenk_filings.latest(1) if tenk_filings else None
-            latest_10qs = tenq_filings.latest(4) if tenq_filings else None
-            
-            result = {
-                'success': True,
-                'company_name': company.name,
-                'ticker': ticker.upper(),
-                'tenk': latest_10k,
-                'tenq': latest_10qs,
-                'cik': company.cik,
-                '_from_cache': False
-            }
-            
-            # Cache the result
-            if self.use_cache:
-                # Store serializable version (without Filing objects)
-                cache_data = {
-                    'success': True,
-                    'company_name': company.name,
-                    'ticker': ticker.upper(),
-                    'cik': company.cik,
-                    'has_10k': latest_10k is not None,
-                    'has_10q': latest_10qs is not None,
-                    'cached_at': datetime.now().isoformat()
-                }
-                self.cache.set('financial_statements', cache_data, ticker=ticker, cost=0.01)
-            
-            return result
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e),
-                'ticker': ticker.upper()
-            }
-    
-    def get_stock_price(self, ticker: str) -> Dict:
-        """
-        Get current stock price with caching
-        Cached for 24 hours (daily refresh)
-        """
-        
-        if self.use_cache:
-            cached = self.cache.get('stock_fundamentals', ticker=ticker)
-            if cached:
-                cached['_from_cache'] = True
-                return cached
-        
-        # Cache miss - fetch fresh
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            result = {
-                'success': True,
-                'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
-                'market_cap': info.get('marketCap', 0),
-                'pe_ratio': info.get('trailingPE', 0),
-                'forward_pe': info.get('forwardPE', 0),
-                '_from_cache': False
-            }
-            
-            if self.use_cache:
-                self.cache.set('stock_fundamentals', result, ticker=ticker, cost=0.001)
-            
-            return result
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
     
     def extract_financial_metrics(self, filing) -> Dict:
         """Extract key financial metrics from filing"""
@@ -164,8 +65,22 @@ class CompanyPerformanceAnalyzer:
             if isinstance(operating_income, pd.Series):
                 operating_income = operating_income.iloc[0] if len(operating_income) > 0 else 0
             
+            # Assets/Liabilities/Cash/Debt for financial health
+            assets = facts.get('Assets', 0)
+            liabilities = facts.get('Liabilities', 0)
+            cash = facts.get('CashAndCashEquivalentsAtCarryingValue', 0)
+            debt = facts.get('LongTermDebt', 0)
+            
+            if isinstance(assets, pd.Series):
+                assets = assets.iloc[0] if len(assets) > 0 else 0
+            if isinstance(liabilities, pd.Series):
+                liabilities = liabilities.iloc[0] if len(liabilities) > 0 else 0
+            if isinstance(cash, pd.Series):
+                cash = cash.iloc[0] if len(cash) > 0 else 0
+            if isinstance(debt, pd.Series):
+                debt = debt.iloc[0] if len(debt) > 0 else 0
+            
             # Calculate margins
-            gross_margin = 0
             operating_margin = 0
             net_margin = 0
             
@@ -175,13 +90,22 @@ class CompanyPerformanceAnalyzer:
                 if net_income:
                     net_margin = (net_income / revenue) * 100
             
+            # Calculate ratios
+            debt_to_assets = (debt / assets * 100) if assets else 0
+            cash_to_debt = (cash / debt) if debt else 999
+            
             return {
                 'revenue': float(revenue) if revenue else 0,
                 'net_income': float(net_income) if net_income else 0,
                 'operating_income': float(operating_income) if operating_income else 0,
-                'gross_margin': float(gross_margin) if gross_margin else 0,
                 'operating_margin': float(operating_margin) if operating_margin else 0,
-                'net_margin': float(net_margin) if net_margin else 0
+                'net_margin': float(net_margin) if net_margin else 0,
+                'assets': float(assets) if assets else 0,
+                'liabilities': float(liabilities) if liabilities else 0,
+                'cash': float(cash) if cash else 0,
+                'debt': float(debt) if debt else 0,
+                'debt_to_assets': float(debt_to_assets),
+                'cash_to_debt': float(cash_to_debt) if cash_to_debt < 999 else 999
             }
             
         except Exception as e:
@@ -189,9 +113,138 @@ class CompanyPerformanceAnalyzer:
                 'revenue': 0,
                 'net_income': 0,
                 'operating_income': 0,
-                'gross_margin': 0,
                 'operating_margin': 0,
                 'net_margin': 0,
+                'assets': 0,
+                'liabilities': 0,
+                'cash': 0,
+                'debt': 0,
+                'debt_to_assets': 0,
+                'cash_to_debt': 0,
+                'error': str(e)
+            }
+    
+    def get_company_data(self, ticker: str) -> Dict:
+        """
+        Fetch company data with proper caching
+        FIXED: Caches extracted metrics, not Filing objects
+        """
+        
+        # Check cache first
+        if self.use_cache:
+            cached = self.cache.get('financial_statements', ticker=ticker)
+            if cached and cached.get('current_metrics'):
+                cached['_from_cache'] = True
+                return cached
+        
+        # Cache miss - fetch fresh data from SEC
+        try:
+            company = Company(ticker)
+            
+            # Get most recent filings
+            tenk_filings = company.get_filings(form="10-K")
+            tenq_filings = company.get_filings(form="10-Q")
+            
+            # Get latest of each type
+            latest_10k = None
+            latest_10qs = []
+            
+            try:
+                for f in tenk_filings:
+                    latest_10k = f
+                    break
+            except:
+                pass
+            
+            try:
+                count = 0
+                for f in tenq_filings:
+                    latest_10qs.append(f)
+                    count += 1
+                    if count >= 4:
+                        break
+            except:
+                pass
+            
+            if not latest_10k and not latest_10qs:
+                return {
+                    'success': False,
+                    'error': 'No recent filings available',
+                    'ticker': ticker.upper()
+                }
+            
+            # Use most recent filing for current metrics
+            latest_filing = latest_10qs[0] if latest_10qs else latest_10k
+            current_metrics = self.extract_financial_metrics(latest_filing)
+            
+            # Get prior period for comparison
+            prior_filing = latest_10qs[3] if len(latest_10qs) > 3 else latest_10k
+            prior_metrics = self.extract_financial_metrics(prior_filing) if prior_filing else None
+            
+            # Get filing date
+            filing_date = 'Unknown'
+            try:
+                if hasattr(latest_filing, 'filing_date'):
+                    filing_date = latest_filing.filing_date.strftime('%Y-%m-%d')
+            except:
+                pass
+            
+            result = {
+                'success': True,
+                'company_name': company.name,
+                'ticker': ticker.upper(),
+                'cik': company.cik,
+                'current_metrics': current_metrics,
+                'prior_metrics': prior_metrics,
+                'filing_date': filing_date,
+                'has_10k': latest_10k is not None,
+                'has_10q': len(latest_10qs) > 0,
+                '_from_cache': False
+            }
+            
+            # Cache the extracted metrics (NOT the Filing objects)
+            if self.use_cache:
+                self.cache.set('financial_statements', result, ticker=ticker, cost=0.01)
+            
+            return result
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'ticker': ticker.upper()
+            }
+    
+    def get_stock_price(self, ticker: str) -> Dict:
+        """Get current stock price with caching"""
+        
+        if self.use_cache:
+            cached = self.cache.get('stock_fundamentals', ticker=ticker)
+            if cached:
+                cached['_from_cache'] = True
+                return cached
+        
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            result = {
+                'success': True,
+                'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
+                'market_cap': info.get('marketCap', 0),
+                'pe_ratio': info.get('trailingPE', 0),
+                'forward_pe': info.get('forwardPE', 0),
+                '_from_cache': False
+            }
+            
+            if self.use_cache:
+                self.cache.set('stock_fundamentals', result, ticker=ticker, cost=0.001)
+            
+            return result
+            
+        except Exception as e:
+            return {
+                'success': False,
                 'error': str(e)
             }
     
@@ -232,7 +285,6 @@ class CompanyPerformanceAnalyzer:
         operating_margin = metrics.get('operating_margin', 0)
         net_margin = metrics.get('net_margin', 0)
         
-        # Score based on operating margin
         if operating_margin >= 30:
             score = 2.0
             reasoning = f"Exceptional margins: {operating_margin:.1f}% operating"
@@ -259,63 +311,35 @@ class CompanyPerformanceAnalyzer:
             'reasoning': reasoning
         }
     
-    def assess_financial_health(self, filing) -> Dict:
-        """Assess financial health from balance sheet"""
-        try:
-            facts = filing.financials
-            
-            # Get balance sheet items
-            assets = facts.get('Assets', 0)
-            liabilities = facts.get('Liabilities', 0)
-            cash = facts.get('CashAndCashEquivalentsAtCarryingValue', 0)
-            debt = facts.get('LongTermDebt', 0)
-            
-            if isinstance(assets, pd.Series):
-                assets = assets.iloc[0] if len(assets) > 0 else 0
-            if isinstance(liabilities, pd.Series):
-                liabilities = liabilities.iloc[0] if len(liabilities) > 0 else 0
-            if isinstance(cash, pd.Series):
-                cash = cash.iloc[0] if len(cash) > 0 else 0
-            if isinstance(debt, pd.Series):
-                debt = debt.iloc[0] if len(debt) > 0 else 0
-            
-            # Calculate ratios
-            debt_to_assets = (debt / assets * 100) if assets else 0
-            cash_to_debt = (cash / debt) if debt else 999
-            
-            # Score
-            if debt_to_assets < 20 and cash > debt:
-                score = 2.0
-                reasoning = f"Excellent: {debt_to_assets:.1f}% debt/assets, {cash_to_debt:.1f}x cash coverage"
-            elif debt_to_assets < 40:
-                score = 1.0
-                reasoning = f"Healthy: {debt_to_assets:.1f}% debt/assets"
-            elif debt_to_assets < 60:
-                score = 0
-                reasoning = f"Moderate: {debt_to_assets:.1f}% debt/assets"
-            else:
-                score = -1.0
-                reasoning = f"Concerning: {debt_to_assets:.1f}% debt/assets"
-            
-            return {
-                'score': score,
-                'debt_to_assets': round(debt_to_assets, 2),
-                'cash_to_debt': round(cash_to_debt, 2) if cash_to_debt < 999 else 999,
-                'reasoning': reasoning
-            }
-            
-        except Exception as e:
-            return {
-                'score': 0,
-                'reasoning': f'Unable to assess: {str(e)}'
-            }
+    def assess_financial_health(self, metrics: Dict) -> Dict:
+        """Assess financial health from cached metrics"""
+        debt_to_assets = metrics.get('debt_to_assets', 0)
+        cash_to_debt = metrics.get('cash_to_debt', 0)
+        cash = metrics.get('cash', 0)
+        debt = metrics.get('debt', 0)
+        
+        if debt_to_assets < 20 and cash > debt:
+            score = 2.0
+            reasoning = f"Excellent: {debt_to_assets:.1f}% debt/assets, {cash_to_debt:.1f}x cash coverage"
+        elif debt_to_assets < 40:
+            score = 1.0
+            reasoning = f"Healthy: {debt_to_assets:.1f}% debt/assets"
+        elif debt_to_assets < 60:
+            score = 0
+            reasoning = f"Moderate: {debt_to_assets:.1f}% debt/assets"
+        else:
+            score = -1.0
+            reasoning = f"Concerning: {debt_to_assets:.1f}% debt/assets"
+        
+        return {
+            'score': score,
+            'debt_to_assets': round(debt_to_assets, 2),
+            'cash_to_debt': round(cash_to_debt, 2) if cash_to_debt < 999 else 999,
+            'reasoning': reasoning
+        }
     
     def analyze(self, ticker: str, verbose: bool = True) -> Dict:
-        """
-        Complete company performance analysis with caching
-        
-        Returns comprehensive analysis with cache status
-        """
+        """Complete company performance analysis with caching"""
         
         if verbose:
             print(f"\n{'='*80}")
@@ -324,16 +348,16 @@ class CompanyPerformanceAnalyzer:
                 print(f"Caching: ENABLED (90-day TTL for filings)")
             print(f"{'='*80}\n")
         
-        # Get filings (with caching)
-        filings = self.get_company_filings(ticker)
+        # Get company data (with caching)
+        company_data = self.get_company_data(ticker)
         
-        if not filings.get('success'):
+        if not company_data.get('success'):
             return {
                 'success': False,
-                'error': filings.get('error', 'Failed to fetch filings')
+                'error': company_data.get('error', 'Failed to fetch company data')
             }
         
-        if verbose and filings.get('_from_cache'):
+        if verbose and company_data.get('_from_cache'):
             print("✅ Using cached financial statements (fresh)")
         
         # Get stock price (with caching)
@@ -342,47 +366,32 @@ class CompanyPerformanceAnalyzer:
         if verbose and price_data.get('_from_cache'):
             print("✅ Using cached stock price (fresh)")
         
-        # Analyze financials
-        tenk = filings.get('tenk')
-        tenq = filings.get('tenq')
+        # Use cached metrics
+        current_metrics = company_data.get('current_metrics', {})
+        prior_metrics = company_data.get('prior_metrics', {})
         
-        if not tenk and not tenq:
+        if not current_metrics or current_metrics.get('revenue', 0) == 0:
             return {
                 'success': False,
-                'error': 'No recent filings available'
+                'error': 'No financial data available'
             }
         
-        # Use most recent filing
-        latest_filing = tenq[0] if tenq else tenk[0] if tenk else None
-        
-        if not latest_filing:
-            return {
-                'success': False,
-                'error': 'No valid filings'
-            }
-        
-        # Extract metrics
-        current_metrics = self.extract_financial_metrics(latest_filing)
-        
-        # Get prior period for comparison
-        prior_filing = tenq[3] if tenq and len(tenq) > 3 else tenk[0] if tenk else None
-        prior_metrics = self.extract_financial_metrics(prior_filing) if prior_filing else None
-        
-        # Calculate scores
+        # Calculate scores from cached metrics
         revenue_analysis = self.calculate_revenue_growth(
-            current_metrics['revenue'],
-            prior_metrics['revenue'] if prior_metrics else 0
+            current_metrics.get('revenue', 0),
+            prior_metrics.get('revenue', 0) if prior_metrics else 0
         )
         
         margin_analysis = self.assess_margins(current_metrics)
-        health_analysis = self.assess_financial_health(latest_filing)
+        health_analysis = self.assess_financial_health(current_metrics)
         
         # Weighted composite
         factors = {
             'revenue_growth': revenue_analysis,
             'margins': margin_analysis,
             'financial_health': health_analysis,
-            'profitability': {'score': 1.0, 'reasoning': 'Positive net income'},
+            'profitability': {'score': 1.0 if current_metrics.get('net_income', 0) > 0 else -0.5, 
+                            'reasoning': 'Positive net income' if current_metrics.get('net_income', 0) > 0 else 'Net loss'},
             'guidance': {'score': 0.5, 'reasoning': 'Stable outlook'}
         }
         
@@ -393,6 +402,7 @@ class CompanyPerformanceAnalyzer:
         
         # Convert to 1-10 scale
         composite = round(5.5 + (composite_raw * 2.25), 1)
+        composite = max(1, min(10, composite))  # Clamp to 1-10
         
         # Determine signal
         if composite >= 8.5:
@@ -409,31 +419,30 @@ class CompanyPerformanceAnalyzer:
             print(f"COMPANY SCORE: {composite}/10")
             print(f"SIGNAL: {signal}")
             print(f"{'='*80}")
-            if self.use_cache:
-                print(f"Cache Status: {1 if filings.get('_from_cache') else 0 + 1 if price_data.get('_from_cache') else 0}/2 from cache")
+            cache_hits = (1 if company_data.get('_from_cache') else 0) + (1 if price_data.get('_from_cache') else 0)
+            print(f"Cache Status: {cache_hits}/2 from cache")
             print(f"{'='*80}\n")
         
         return {
             'success': True,
             'ticker': ticker.upper(),
-            'company_name': filings.get('company_name', ticker),
+            'company_name': company_data.get('company_name', ticker),
             'score': composite,
             'signal': signal,
             'factors': factors,
             'current_metrics': current_metrics,
             'prior_metrics': prior_metrics,
             'price_data': price_data,
-            'data_date': latest_filing.filing_date.strftime('%Y-%m-%d') if hasattr(latest_filing, 'filing_date') else 'Unknown',
+            'data_date': company_data.get('filing_date', 'Unknown'),
             '_cache_info': {
-                'filings_cached': filings.get('_from_cache', False),
+                'filings_cached': company_data.get('_from_cache', False),
                 'price_cached': price_data.get('_from_cache', False)
             },
-            'cost': 0.02  # Estimated API cost
+            'cost': 0.02
         }
 
 
 if __name__ == "__main__":
-    # Test
     analyzer = CompanyPerformanceAnalyzer()
     result = analyzer.analyze('NVDA', verbose=True)
     
