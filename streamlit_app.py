@@ -38,11 +38,13 @@ except ImportError:
     ENTERPRISE_FEATURES = False
 
 # Optional: Autonomous Agent
-try:
-    from autonomous_scheduler import AutonomousScheduler
-    AGENT_AVAILABLE = True
-except ImportError:
-    AGENT_AVAILABLE = False
+# Agent feature disabled - uncomment to enable
+# try:
+#     from autonomous_scheduler import AutonomousScheduler
+#     AGENT_AVAILABLE = True
+# except ImportError:
+#     AGENT_AVAILABLE = False
+AGENT_AVAILABLE = False  # Disabled to prevent accidental usage
 
 st.set_page_config(page_title="Factor Impact Intelligence", page_icon="💰", layout="wide")
 
